@@ -349,10 +349,12 @@ tr:hover td { background: #fafffe; }
     <button class="btn-icon" id="mobile-menu-btn" onclick="openMobileMenu()" style="display:none">☰</button>
     <div class="topbar-title" id="topbar-title">대시보드</div>
     <div class="topbar-actions">
-      <button class="btn btn-accent btn-sm" onclick="openVoiceModal()">🎙️ 음성 업무 등록</button>
+      <button class="btn btn-accent btn-sm" onclick="openVoiceModal()">🎙️ 음성 등록</button>
+      <button class="btn btn-secondary btn-sm" onclick="openAITextModal()">🤖 AI 텍스트 분석</button>
       <button class="btn btn-primary btn-sm" onclick="openAddTask()">＋ 업무 추가</button>
       <button class="btn btn-ghost btn-sm" onclick="exportExcel()">📤 엑셀</button>
       <button class="btn btn-ghost btn-sm" onclick="printPDF()">🖨️ 인쇄</button>
+      <button class="btn-icon" onclick="openSettingsModal()" title="설정">⚙️</button>
       <div id="user-profile" style="display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);cursor:pointer;" onclick="confirmSignOut()">
         <img id="user-photo" src="" style="width:28px;height:28px;border-radius:50%;display:none;">
         <span id="user-name" style="font-size:13px;font-weight:600;color:var(--text);"></span>
@@ -503,6 +505,60 @@ tr:hover td { background: #fafffe; }
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('member-modal')">취소</button>
       <button class="btn btn-primary" onclick="saveMember()">추가</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ AI 텍스트 분석 모달 ════════════════ -->
+<div class="modal-overlay" id="ai-text-modal">
+  <div class="modal" style="width:660px;">
+    <div class="modal-header">
+      <h3>🤖 AI 텍스트 분석 → 업무 자동 등록</h3>
+      <button class="modal-close" onclick="closeModal('ai-text-modal')">✕</button>
+    </div>
+    <div id="ai-text-step1">
+      <div class="form-group">
+        <label>회의록, 메모, 업무 내용을 자유롭게 입력하세요</label>
+        <textarea id="ai-text-input" style="min-height:160px;width:100%;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;resize:vertical;" placeholder="예시) 다음 주까지 앱 출시 준비. 김민준이 로그인 API 마무리, 이서연이 메인 화면 UI 디자인 완성, 박지호가 전체 QA 테스트 진행. 긴급하게 처리 필요."></textarea>
+      </div>
+      <div style="background:var(--primary-light);border-radius:var(--radius-sm);padding:12px;margin-top:12px;font-size:12px;color:#2d6e4a;">
+        💡 <strong>AI가 자동으로 분석합니다:</strong> 업무명, 담당자, 카테고리, 우선순위, 마감일, 세부 내용
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('ai-text-modal')">취소</button>
+        <button class="btn btn-secondary" onclick="analyzeWithAI()" id="ai-analyze-btn">🤖 AI 분석 시작</button>
+      </div>
+    </div>
+    <div id="ai-text-step2" style="display:none;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text);">📋 분석된 업무 목록 <span style="font-weight:400;color:var(--text-light);">(등록할 항목 체크)</span></div>
+      <div id="ai-result-list" style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="backToAIStep1()">← 다시 입력</button>
+        <button class="btn btn-primary" onclick="registerAITasks()">✅ 선택 업무 등록</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ 설정 모달 ════════════════ -->
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>⚙️ 설정</h3>
+      <button class="modal-close" onclick="closeModal('settings-modal')">✕</button>
+    </div>
+    <div class="form-group">
+      <label>Claude API 키</label>
+      <input id="s-api-key" type="password" placeholder="sk-ant-api03-...">
+      <div style="font-size:11px;color:var(--text-light);margin-top:4px;">브라우저에만 저장됩니다. 소스코드/서버에 전송되지 않습니다.</div>
+    </div>
+    <div style="margin-top:8px;">
+      <a href="https://console.anthropic.com/settings/keys" target="_blank" style="font-size:12px;color:var(--accent);">🔑 API 키 발급받기 →</a>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="clearApiKey()">키 삭제</button>
+      <button class="btn btn-ghost" onclick="closeModal('settings-modal')">취소</button>
+      <button class="btn btn-primary" onclick="saveApiKey()">저장</button>
     </div>
   </div>
 </div>
@@ -1263,6 +1319,187 @@ function exportExcel() {
 //  PDF 인쇄
 // ══════════════════════════════════════
 function printPDF() { window.print(); }
+
+// ══════════════════════════════════════
+//  설정 (API 키 관리)
+// ══════════════════════════════════════
+function openSettingsModal() {
+  const key = localStorage.getItem('claude_api_key') || '';
+  document.getElementById('s-api-key').value = key ? '••••••••••••••••' : '';
+  openModal('settings-modal');
+}
+function saveApiKey() {
+  const val = document.getElementById('s-api-key').value.trim();
+  if (!val || val.startsWith('•')) { closeModal('settings-modal'); return; }
+  localStorage.setItem('claude_api_key', val);
+  toast('API 키가 저장되었습니다 ✅');
+  closeModal('settings-modal');
+}
+function clearApiKey() {
+  localStorage.removeItem('claude_api_key');
+  document.getElementById('s-api-key').value = '';
+  toast('API 키가 삭제되었습니다', 'warning');
+}
+
+// ══════════════════════════════════════
+//  AI 텍스트 분석 (Claude API)
+// ══════════════════════════════════════
+let aiAnalyzedTasks = [];
+
+function openAITextModal() {
+  document.getElementById('ai-text-step1').style.display = '';
+  document.getElementById('ai-text-step2').style.display = 'none';
+  document.getElementById('ai-text-input').value = '';
+  aiAnalyzedTasks = [];
+  openModal('ai-text-modal');
+}
+function backToAIStep1() {
+  document.getElementById('ai-text-step1').style.display = '';
+  document.getElementById('ai-text-step2').style.display = 'none';
+}
+
+async function analyzeWithAI() {
+  const text = document.getElementById('ai-text-input').value.trim();
+  if (!text) { toast('텍스트를 입력해주세요', 'error'); return; }
+
+  const apiKey = localStorage.getItem('claude_api_key');
+  if (!apiKey) {
+    toast('API 키를 먼저 설정해주세요 (⚙️ 설정)', 'error');
+    closeModal('ai-text-modal');
+    openSettingsModal();
+    return;
+  }
+
+  const btn = document.getElementById('ai-analyze-btn');
+  btn.textContent = '⏳ 분석 중...';
+  btn.disabled = true;
+
+  const teamList = team.map(m => m.name).join(', ');
+  const today2 = today();
+
+  const prompt = `당신은 업무 관리 전문가입니다. 아래 텍스트를 분석해서 업무 항목들을 추출해주세요.
+
+팀원 목록: ${teamList || '없음'}
+오늘 날짜: ${today2}
+
+추출 규칙:
+- 업무를 최대한 세분화해서 독립적인 항목으로 분리
+- 담당자는 팀원 목록에서 정확히 일치하는 이름으로 (없으면 null)
+- category는 반드시 [개발, 디자인, 기획, QA, 마케팅, 운영, 미팅, 기타] 중 하나
+- priority는 반드시 [낮음, 보통, 높음, 긴급] 중 하나
+- dueDate는 YYYY-MM-DD 형식 (언급 없으면 null)
+- status는 반드시 [대기, 진행중] 중 하나
+
+반드시 아래 JSON 배열 형식으로만 응답 (다른 텍스트 없이):
+[
+  {
+    "title": "업무명",
+    "desc": "세부 내용 및 맥락",
+    "assigneeName": "담당자 이름 또는 null",
+    "category": "카테고리",
+    "priority": "우선순위",
+    "dueDate": "YYYY-MM-DD 또는 null",
+    "status": "대기"
+  }
+]
+
+분석할 텍스트:
+${text}`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error?.message || `API 오류 (${res.status})`);
+    }
+
+    const data = await res.json();
+    const content = data.content[0].text.trim();
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('응답 형식 오류');
+
+    aiAnalyzedTasks = JSON.parse(jsonMatch[0]).map(t => ({
+      ...t,
+      id: uid(),
+      assignee: team.find(m => m.name === t.assigneeName)?.id || '',
+      start: today2,
+      end: t.dueDate || '',
+      progress: 0,
+      tags: [],
+      attachments: [],
+      comments: [],
+      created: today2
+    }));
+
+    renderAIResultList();
+    document.getElementById('ai-text-step1').style.display = 'none';
+    document.getElementById('ai-text-step2').style.display = '';
+
+  } catch (e) {
+    toast('분석 실패: ' + e.message, 'error');
+  } finally {
+    btn.textContent = '🤖 AI 분석 시작';
+    btn.disabled = false;
+  }
+}
+
+function renderAIResultList() {
+  const prioBadge = p => ({낮음:'badge-low',보통:'badge-normal',높음:'badge-high',긴급:'badge-urgent'}[p]||'badge-normal');
+  const memberName = id => team.find(m=>m.id===id)?.name || '미지정';
+
+  document.getElementById('ai-result-list').innerHTML = aiAnalyzedTasks.map((t, i) => `
+    <div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px;border:1px solid var(--border);">
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <input type="checkbox" id="ai-chk-${i}" checked style="margin-top:3px;accent-color:var(--primary);width:16px;height:16px;flex-shrink:0;">
+        <div style="flex:1;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            <strong style="font-size:14px;">${t.title}</strong>
+            <span class="badge ${prioBadge(t.priority)}">${t.priority}</span>
+            <span class="badge badge-wait">${t.category}</span>
+            ${t.status==='진행중'?'<span class="badge badge-doing">진행중</span>':''}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;color:var(--text-light);margin-bottom:6px;">
+            <span>👤 ${memberName(t.assignee)}</span>
+            <span>📅 ${t.end||'마감일 없음'}</span>
+          </div>
+          ${t.desc?`<div style="font-size:12px;color:var(--text);background:#fff;padding:8px;border-radius:6px;">${t.desc}</div>`:''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function registerAITasks() {
+  const selected = aiAnalyzedTasks.filter((_, i) => {
+    const chk = document.getElementById(`ai-chk-${i}`);
+    return chk && chk.checked;
+  });
+
+  if (!selected.length) { toast('등록할 업무를 선택해주세요', 'error'); return; }
+
+  for (const t of selected) {
+    const { assigneeName, dueDate, ...taskData } = t;
+    await dbSet('tasks', taskData.id, taskData);
+  }
+
+  toast(`✅ ${selected.length}개 업무가 등록되었습니다!`);
+  closeModal('ai-text-modal');
+  showView('tasks');
+}
 
 // ══════════════════════════════════════
 //  음성 인식 (Web Speech API)
