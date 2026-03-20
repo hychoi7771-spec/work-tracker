@@ -605,34 +605,28 @@ function setupRealtimeListeners() {
 
   let initialized = false;
 
-  const check = async () => {
+  const check = () => {
     if (!loaded.tasks || !loaded.team || !loaded.tags) return;
-    if (initialized) { showView(currentView); return; }
+    if (initialized) return;
     initialized = true;
-
-    // 최초 1회만: settings 문서로 초기화 여부 확인
-    const settingsDoc = await db.collection('settings').doc('workspace').get();
-    if (!settingsDoc.exists) {
-      await db.collection('settings').doc('workspace').set({ createdAt: new Date().toISOString() });
-      if (!team.length) await seedTeam();
-      if (!tags.length) await seedTags();
-      // 샘플 업무는 자동 생성 안 함 - 직접 등록
-    }
     showView('dashboard');
   };
 
   unsubscribers.push(db.collection('tasks').onSnapshot(snap => {
     tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    loaded.tasks = true; check();
+    loaded.tasks = true;
+    check();
     if (initialized) showView(currentView);
   }));
   unsubscribers.push(db.collection('team').onSnapshot(snap => {
     team = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    loaded.team = true; check();
+    loaded.team = true;
+    check();
   }));
   unsubscribers.push(db.collection('tags').onSnapshot(snap => {
     tags = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    loaded.tags = true; check();
+    loaded.tags = true;
+    check();
   }));
 }
 
