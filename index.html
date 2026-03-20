@@ -139,6 +139,19 @@ tr:hover td { background: #fafffe; }
 .gantt-bar { position: absolute; height: 22px; top: 50%; transform: translateY(-50%); border-radius: 6px; opacity: .85; display: flex; align-items: center; padding: 0 8px; font-size: 11px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; min-width: 4px; cursor: pointer; }
 .gantt-bar:hover { opacity: 1; }
 
+/* ── 그룹 보기 ── */
+.group-section { margin-bottom: 12px; }
+.group-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--primary-light); border-radius: var(--radius-sm); cursor: pointer; user-select: none; }
+.group-header:hover { background: var(--primary); }
+.group-toggle { font-size: 11px; color: var(--text-light); width: 14px; }
+.group-label { font-weight: 700; font-size: 14px; flex: 1; }
+.group-meta { font-size: 12px; color: var(--text-light); white-space: nowrap; }
+.group-progress-wrap { width: 100px; height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
+.group-progress-fill { height: 100%; background: var(--primary); border-radius: 99px; }
+.group-pct { font-size: 12px; font-weight: 700; color: var(--text); width: 36px; text-align: right; }
+.group-body { border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius-sm) var(--radius-sm); overflow: hidden; }
+.group-body table { margin: 0; }
+
 /* ── 캘린더 ── */
 .calendar-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .calendar-nav h3 { font-size: 16px; font-weight: 700; flex: 1; text-align: center; }
@@ -334,6 +347,9 @@ tr:hover td { background: #fafffe; }
     <div class="nav-item" onclick="showView('tags')" id="nav-tags">
       <span class="nav-icon">🏷️</span><span class="nav-label">태그 관리</span>
     </div>
+    <div class="nav-item" onclick="showView('projects')" id="nav-projects">
+      <span class="nav-icon">📁</span><span class="nav-label">프로젝트</span>
+    </div>
   </div>
   <div class="sidebar-footer">
     <div class="collapse-btn" onclick="toggleSidebar()">
@@ -391,6 +407,10 @@ tr:hover td { background: #fafffe; }
           <option>개발</option><option>디자인</option><option>기획</option>
           <option>QA</option><option>마케팅</option><option>운영</option><option>미팅</option><option>기타</option>
         </datalist>
+      </div>
+      <div class="form-group">
+        <label>프로젝트</label>
+        <select id="f-project"><option value="">프로젝트 없음</option></select>
       </div>
       <div class="form-group">
         <label>상태</label>
@@ -510,6 +530,25 @@ tr:hover td { background: #fafffe; }
   </div>
 </div>
 
+<!-- ════════════════ 프로젝트 모달 ════════════════ -->
+<div class="modal-overlay" id="project-modal">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <h3 id="project-modal-title">프로젝트 추가</h3>
+      <button class="btn-icon" onclick="closeModal('project-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label>프로젝트명 *</label><input id="proj-name" type="text" placeholder="프로젝트명 입력"></div>
+      <div class="form-group"><label>설명</label><input id="proj-desc" type="text" placeholder="간단한 설명"></div>
+      <div class="form-group"><label>색상</label><input id="proj-color" type="color" value="#a8d8b9" style="width:60px;height:36px;padding:2px;border-radius:8px;cursor:pointer;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('project-modal')">취소</button>
+      <button class="btn btn-primary" onclick="saveProject()">저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- ════════════════ 날짜별 일정 모달 ════════════════ -->
 <div class="modal-overlay" id="day-tasks-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
   <div class="modal" style="max-width:420px;">
@@ -624,14 +663,15 @@ let currentUser = null;
 // ══════════════════════════════════════
 //  데이터 & 상태
 // ══════════════════════════════════════
-let tasks = [], team = [], tags = [], charts = {};
+let tasks = [], team = [], tags = [], projects = [], charts = {};
 let editingId = null, currentView = 'dashboard';
 let voiceRecognition = null, isRecording = false;
 let voiceTranscript = '', voiceAIResult = null;
 let taskTags = [], taskAttachments = [];
-let filterStatus = '', filterPriority = '', filterAssignee = '', filterCategory = '', filterSearch = '';
+let filterStatus = '', filterPriority = '', filterAssignee = '', filterCategory = '', filterSearch = '', filterProject = '';
+let taskGroupMode = 'list'; // 'list' | 'category' | 'project'
 let calendarDate = new Date();
-let unsubscribers = [];
+let unsubscribers = [], collapsedGroups = {};
 
 // ══════════════════════════════════════
 //  인증
@@ -669,12 +709,12 @@ auth.onAuthStateChanged(user => {
 function setupRealtimeListeners() {
   unsubscribers.forEach(fn => fn());
   unsubscribers = [];
-  let loaded = { tasks: false, team: false, tags: false };
+  let loaded = { tasks: false, team: false, tags: false, projects: false };
 
   let initialized = false;
 
   const check = () => {
-    if (!loaded.tasks || !loaded.team || !loaded.tags) return;
+    if (!loaded.tasks || !loaded.team || !loaded.tags || !loaded.projects) return;
     if (initialized) return;
     initialized = true;
     showView('dashboard');
@@ -695,6 +735,12 @@ function setupRealtimeListeners() {
     tags = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     loaded.tags = true;
     check();
+  }));
+  unsubscribers.push(db.collection('projects').onSnapshot(snap => {
+    projects = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    loaded.projects = true;
+    check();
+    if (initialized) showView(currentView);
   }));
 }
 
@@ -755,7 +801,7 @@ function showView(v) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const nav = document.getElementById('nav-'+v);
   if (nav) nav.classList.add('active');
-  const titles = {dashboard:'대시보드',tasks:'업무 목록',gantt:'간트차트',calendar:'캘린더',team:'팀 관리',tags:'태그 관리'};
+  const titles = {dashboard:'대시보드',tasks:'업무 목록',gantt:'간트차트',calendar:'캘린더',team:'팀 관리',tags:'태그 관리',projects:'프로젝트 관리'};
   document.getElementById('topbar-title').textContent = titles[v] || '';
   Object.values(charts).forEach(c => { try{ c.destroy(); }catch(e){} });
   charts = {};
@@ -766,6 +812,7 @@ function showView(v) {
   else if (v==='calendar') renderCalendar(content);
   else if (v==='team') renderTeam(content);
   else if (v==='tags') renderTagsView(content);
+  else if (v==='projects') renderProjectsView(content);
   closeMobileMenu();
 }
 
@@ -845,15 +892,13 @@ function buildCharts() {
 //  업무 목록
 // ══════════════════════════════════════
 function renderTasks(el) {
+  const ft = filteredTasks();
   el.innerHTML = `
     <div class="filter-bar">
       <input type="text" placeholder="🔍 업무 검색..." id="f-search" value="${filterSearch}" oninput="filterSearch=this.value;renderTasks(document.getElementById('content'))">
       <select id="f-st" onchange="filterStatus=this.value;renderTasks(document.getElementById('content'))">
         <option value="">전체 상태</option>
-        <option value="대기" ${filterStatus==='대기'?'selected':''}>대기</option>
-        <option value="진행중" ${filterStatus==='진행중'?'selected':''}>진행중</option>
-        <option value="검토중" ${filterStatus==='검토중'?'selected':''}>검토중</option>
-        <option value="완료" ${filterStatus==='완료'?'selected':''}>완료</option>
+        ${['대기','진행중','검토중','완료'].map(s=>`<option value="${s}" ${filterStatus===s?'selected':''}>${s}</option>`).join('')}
       </select>
       <select onchange="filterPriority=this.value;renderTasks(document.getElementById('content'))">
         <option value="">전체 우선순위</option>
@@ -865,12 +910,54 @@ function renderTasks(el) {
       </select>
       <select onchange="filterCategory=this.value;renderTasks(document.getElementById('content'))">
         <option value="">전체 카테고리</option>
-        ${['개발','디자인','기획','QA','마케팅','운영','미팅','기타'].map(c=>`<option value="${c}" ${filterCategory===c?'selected':''}>${c}</option>`).join('')}
+        ${[...new Set(tasks.map(t=>t.category).filter(Boolean))].map(c=>`<option value="${c}" ${filterCategory===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <select onchange="filterProject=this.value;renderTasks(document.getElementById('content'))">
+        <option value="">전체 프로젝트</option>
+        ${projects.map(p=>`<option value="${p.id}" ${filterProject===p.id?'selected':''}>${p.name}</option>`).join('')}
       </select>
       <button class="btn btn-ghost btn-sm" onclick="resetFilters()">초기화</button>
     </div>
-    <div class="task-table-wrap">${buildTable(filteredTasks())}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <span style="font-size:12px;color:var(--text-light);">그룹 보기:</span>
+      ${['list','category','project'].map(m=>`<button class="btn btn-sm ${taskGroupMode===m?'btn-primary':'btn-ghost'}" onclick="taskGroupMode='${m}';renderTasks(document.getElementById('content'))">${{list:'전체 목록',category:'카테고리별',project:'프로젝트별'}[m]}</button>`).join('')}
+      <span style="margin-left:auto;font-size:12px;color:var(--text-light);">총 ${ft.length}건</span>
+    </div>
+    <div class="task-table-wrap">${buildGroupedTasks(ft)}</div>
   `;
+}
+
+function buildGroupedTasks(list) {
+  if (taskGroupMode === 'list') return buildTable(list);
+  const groups = {};
+  if (taskGroupMode === 'category') {
+    list.forEach(t => { const k = t.category||'미분류'; if (!groups[k]) groups[k]=[]; groups[k].push(t); });
+  } else {
+    list.forEach(t => {
+      const p = projects.find(p=>p.id===t.project);
+      const k = p ? p.id : '__none__';
+      if (!groups[k]) groups[k]=[];
+      groups[k].push(t);
+    });
+  }
+  if (!Object.keys(groups).length) return `<div class="empty-state"><div class="empty-icon">📭</div><div>표시할 업무가 없습니다</div></div>`;
+  return Object.entries(groups).map(([key, items]) => {
+    const label = taskGroupMode==='category' ? key : (projects.find(p=>p.id===key)?.name || '프로젝트 없음');
+    const avg = items.length ? Math.round(items.reduce((s,t)=>s+(t.progress||0),0)/items.length) : 0;
+    const done = items.filter(t=>t.status==='완료').length;
+    const collapsed = collapsedGroups[key];
+    return `
+      <div class="group-section">
+        <div class="group-header" onclick="collapsedGroups['${key}']=!collapsedGroups['${key}'];renderTasks(document.getElementById('content'))">
+          <span class="group-toggle">${collapsed?'▶':'▼'}</span>
+          <span class="group-label">${label}</span>
+          <span class="group-meta">${done}/${items.length}건 완료</span>
+          <div class="group-progress-wrap"><div class="group-progress-fill" style="width:${avg}%"></div></div>
+          <span class="group-pct">${avg}%</span>
+        </div>
+        ${collapsed ? '' : `<div class="group-body">${buildTable(items, false)}</div>`}
+      </div>`;
+  }).join('');
 }
 
 function filteredTasks() {
@@ -879,12 +966,13 @@ function filteredTasks() {
     if (filterPriority && t.priority!==filterPriority) return false;
     if (filterAssignee && t.assignee!==filterAssignee) return false;
     if (filterCategory && t.category!==filterCategory) return false;
+    if (filterProject && t.project!==filterProject) return false;
     if (filterSearch && !t.title.toLowerCase().includes(filterSearch.toLowerCase())) return false;
     return true;
   });
 }
 function resetFilters() {
-  filterStatus=filterPriority=filterAssignee=filterCategory=filterSearch='';
+  filterStatus=filterPriority=filterAssignee=filterCategory=filterSearch=filterProject='';
   renderTasks(document.getElementById('content'));
 }
 
@@ -1085,6 +1173,75 @@ function renderTeam(el) {
 }
 
 // ══════════════════════════════════════
+//  프로젝트 관리
+// ══════════════════════════════════════
+function renderProjectsView(el) {
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-size:14px;color:var(--text-light);">총 ${projects.length}개 프로젝트</div>
+      <button class="btn btn-primary btn-sm" onclick="openProjectModal()">+ 프로젝트 추가</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;">
+      ${projects.length ? projects.map(p => {
+        const ptasks = tasks.filter(t=>t.project===p.id);
+        const done = ptasks.filter(t=>t.status==='완료').length;
+        const avg = ptasks.length ? Math.round(ptasks.reduce((s,t)=>s+(t.progress||0),0)/ptasks.length) : 0;
+        const members = [...new Set(ptasks.map(t=>t.assignee).filter(Boolean))].map(id=>team.find(m=>m.id===id)?.name||'').filter(Boolean);
+        return `<div class="card" style="padding:20px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:14px;height:14px;border-radius:50%;background:${p.color||'var(--primary)'};flex-shrink:0;"></div>
+              <span style="font-weight:700;font-size:15px;">${p.name}</span>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn-icon" onclick="openProjectModal('${p.id}')">✏️</button>
+              <button class="btn-icon" onclick="deleteProject('${p.id}')">🗑️</button>
+            </div>
+          </div>
+          ${p.desc ? `<div style="font-size:12px;color:var(--text-light);margin-bottom:12px;">${p.desc}</div>` : ''}
+          <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:var(--text-light);">
+            <span>📋 ${ptasks.length}건</span>
+            <span>✅ ${done}건 완료</span>
+            ${members.length ? `<span>👥 ${members.slice(0,3).join(', ')}${members.length>3?` 외 ${members.length-3}명`:''}</span>` : ''}
+          </div>
+          <div style="margin-bottom:6px;font-size:12px;font-weight:600;">진행률 ${avg}%</div>
+          <div style="background:var(--border);border-radius:99px;height:8px;overflow:hidden;">
+            <div style="height:100%;border-radius:99px;background:${p.color||'var(--primary)'};width:${avg}%;transition:width .4s;"></div>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:12px;width:100%;" onclick="filterProject='${p.id}';taskGroupMode='list';showView('tasks')">업무 목록 보기 →</button>
+        </div>`;
+      }).join('') : `<div class="empty-state"><div class="empty-icon">📁</div><div>프로젝트를 추가해보세요</div></div>`}
+    </div>
+  `;
+}
+
+let editingProjectId = null;
+function openProjectModal(id) {
+  editingProjectId = id||null;
+  const p = id ? projects.find(x=>x.id===id) : null;
+  document.getElementById('proj-name').value = p?.name||'';
+  document.getElementById('proj-desc').value = p?.desc||'';
+  document.getElementById('proj-color').value = p?.color||'#a8d8b9';
+  document.getElementById('project-modal-title').textContent = id ? '프로젝트 수정' : '프로젝트 추가';
+  openModal('project-modal');
+}
+async function saveProject() {
+  const name = document.getElementById('proj-name').value.trim();
+  if (!name) { toast('프로젝트명을 입력하세요','error'); return; }
+  const id = editingProjectId || uid();
+  await dbSet('projects', id, { id, name, desc: document.getElementById('proj-desc').value, color: document.getElementById('proj-color').value });
+  toast(editingProjectId ? '수정되었습니다' : '프로젝트가 추가되었습니다');
+  closeModal('project-modal');
+}
+async function deleteProject(id) {
+  if (!confirm('프로젝트를 삭제하시겠습니까?\n(연결된 업무의 프로젝트 정보가 해제됩니다)')) return;
+  await dbDelete('projects', id);
+  const linked = tasks.filter(t=>t.project===id);
+  for (const t of linked) await dbUpdate('tasks', t.id, {project:''});
+  toast('삭제되었습니다','warning');
+}
+
+// ══════════════════════════════════════
 //  태그 관리
 // ══════════════════════════════════════
 function renderTagsView(el) {
@@ -1125,6 +1282,7 @@ function openAddTask(prefill={}) {
   document.getElementById('f-start').value = prefill.start||today();
   document.getElementById('f-end').value = prefill.end||'';
   fillAssigneeSelect(prefill.assignee||'');
+  fillProjectSelect(prefill.project||'');
   renderTaskTagBadges();
   renderAttachList();
   const catEl = document.getElementById('f-category');
@@ -1148,9 +1306,14 @@ function openEditTask(id) {
   document.getElementById('f-end').value = t.end||'';
   fillAssigneeSelect(t.assignee);
   document.getElementById('f-category').value = t.category;
+  fillProjectSelect(t.project||'');
   renderTaskTagBadges();
   renderAttachList();
   openModal('task-modal');
+}
+function fillProjectSelect(selected) {
+  const el = document.getElementById('f-project');
+  el.innerHTML = `<option value="">프로젝트 없음</option>${projects.map(p=>`<option value="${p.id}"${p.id===selected?' selected':''}>${p.name}</option>`).join('')}`;
 }
 function fillAssigneeSelect(selected) {
   const el = document.getElementById('f-assignee');
@@ -1165,6 +1328,7 @@ async function saveTask() {
     id: taskId, title,
     assignee: document.getElementById('f-assignee').value,
     category: document.getElementById('f-category').value,
+    project: document.getElementById('f-project').value,
     status: document.getElementById('f-status').value,
     priority: document.getElementById('f-priority').value,
     start: document.getElementById('f-start').value,
