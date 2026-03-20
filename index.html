@@ -998,10 +998,12 @@ function renderCalendar(el) {
     const isToday = dt.toDateString()===today.toDateString();
     const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dtStr&&t.end>=dtStr);
     const isSun = dt.getDay()===0, isSat = dt.getDay()===6;
-    cells += `<div class="cal-cell${isToday?' today':''}">
-      <div class="cal-date" style="color:${isSun?'#d04040':isSat?'#4060d0':'var(--text)'}">${d}</div>
-      ${dayTasks.slice(0,3).map(t=>`<div class="cal-task-item" style="background:${barColors[t.category]||'#e0e0e0'}40;color:var(--text);" onclick="openDetail('${t.id}')" title="${t.title}">${t.title}</div>`).join('')}
-      ${dayTasks.length>3?`<div style="font-size:10px;color:var(--text-light)">+${dayTasks.length-3}건</div>`:''}
+    cells += `<div class="cal-cell${isToday?' today':''}" onclick="openAddTask({start:'${dtStr}',end:'${dtStr}'})" style="cursor:pointer;" title="${dtStr} 클릭하여 업무 추가">
+      <div class="cal-date" style="color:${isSun?'#d04040':isSat?'#4060d0':'var(--text)'}">
+        ${d}<span style="float:right;color:var(--primary);font-size:13px;opacity:.5;">+</span>
+      </div>
+      ${dayTasks.slice(0,3).map(t=>`<div class="cal-task-item" style="background:${barColors[t.category]||'#e0e0e0'}40;color:var(--text);" onclick="event.stopPropagation();openDetail('${t.id}')" title="${t.title}">${t.title}</div>`).join('')}
+      ${dayTasks.length>3?`<div style="font-size:10px;color:var(--text-light)">+${dayTasks.length-3}건 더보기</div>`:''}
     </div>`;
   }
 
