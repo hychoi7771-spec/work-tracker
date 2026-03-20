@@ -510,6 +510,17 @@ tr:hover td { background: #fafffe; }
   </div>
 </div>
 
+<!-- ════════════════ 날짜별 일정 모달 ════════════════ -->
+<div class="modal-overlay" id="day-tasks-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
+      <h3 id="day-tasks-title"></h3>
+      <button class="btn-icon" onclick="document.getElementById('day-tasks-modal').style.display='none'">✕</button>
+    </div>
+    <div class="modal-body" id="day-tasks-list"></div>
+  </div>
+</div>
+
 <!-- ════════════════ AI 텍스트 분석 모달 ════════════════ -->
 <div class="modal-overlay" id="ai-text-modal">
   <div class="modal" style="width:660px;">
@@ -981,6 +992,23 @@ function renderGantt(el) {
 
 // ══════════════════════════════════════
 //  캘린더
+function openDayTasks(dateStr) {
+  const barColors = {개발:'#a8d8b9',디자인:'#f5c6d0',기획:'#c5b8e8',QA:'#f9e4b7',마케팅:'#b8d8f5',운영:'#f5b8a0',미팅:'#d4f0de',기타:'#e0e0e0'};
+  const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dateStr&&t.end>=dateStr);
+  const [y,m,d] = dateStr.split('-');
+  const modal = document.getElementById('day-tasks-modal');
+  document.getElementById('day-tasks-title').textContent = `${y}년 ${parseInt(m)}월 ${parseInt(d)}일 일정`;
+  document.getElementById('day-tasks-list').innerHTML = dayTasks.map(t=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;background:${barColors[t.category]||'#e0e0e0'}30;margin-bottom:8px;cursor:pointer;" onclick="closeModal('day-tasks-modal');openDetail('${t.id}')">
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:13px;">${t.title}</div>
+        <div style="font-size:11px;color:var(--text-light);">${t.assignee?memberName(t.assignee):''} · ${t.category} · ${t.status}</div>
+      </div>
+      <div style="font-size:11px;color:var(--primary);font-weight:700;">${t.progress}%</div>
+    </div>`).join('') + `<button class="btn btn-primary btn-sm" style="width:100%;margin-top:8px;" onclick="closeModal('day-tasks-modal');openAddTask({start:'${dateStr}',end:'${dateStr}'})">+ 이 날짜에 업무 추가</button>`;
+  modal.style.display='flex';
+}
+
 // ══════════════════════════════════════
 function renderCalendar(el) {
   const y = calendarDate.getFullYear(), m = calendarDate.getMonth();
@@ -1003,7 +1031,7 @@ function renderCalendar(el) {
         ${d}<span style="float:right;color:var(--primary);font-size:13px;opacity:.5;">+</span>
       </div>
       ${dayTasks.slice(0,3).map(t=>`<div class="cal-task-item" style="background:${barColors[t.category]||'#e0e0e0'}40;color:var(--text);" onclick="event.stopPropagation();openDetail('${t.id}')" title="${t.title}">${t.title}</div>`).join('')}
-      ${dayTasks.length>3?`<div style="font-size:10px;color:var(--text-light)">+${dayTasks.length-3}건 더보기</div>`:''}
+      ${dayTasks.length>3?`<div style="font-size:10px;color:var(--primary);cursor:pointer;font-weight:600;padding:1px 3px;border-radius:3px;" onclick="event.stopPropagation();openDayTasks('${dtStr}')">+${dayTasks.length-3}건 더보기</div>`:''}
     </div>`;
   }
 
