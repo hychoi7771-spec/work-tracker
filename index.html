@@ -895,7 +895,7 @@ function renderTasks(el) {
   const ft = filteredTasks();
   el.innerHTML = `
     <div class="filter-bar">
-      <input type="text" placeholder="🔍 업무 검색..." id="f-search" value="${filterSearch}" oninput="filterSearch=this.value;renderTasks(document.getElementById('content'))">
+      <input type="text" placeholder="🔍 업무 검색..." id="f-search" value="${filterSearch}" oninput="filterSearch=this.value;refreshTaskTable()">
       <select id="f-st" onchange="filterStatus=this.value;renderTasks(document.getElementById('content'))">
         <option value="">전체 상태</option>
         ${['대기','진행중','검토중','완료'].map(s=>`<option value="${s}" ${filterStatus===s?'selected':''}>${s}</option>`).join('')}
@@ -974,6 +974,10 @@ function filteredTasks() {
 function resetFilters() {
   filterStatus=filterPriority=filterAssignee=filterCategory=filterSearch=filterProject='';
   renderTasks(document.getElementById('content'));
+}
+function refreshTaskTable() {
+  const wrap = document.querySelector('.task-table-wrap');
+  if (wrap) wrap.innerHTML = buildGroupedTasks(filteredTasks());
 }
 
 function buildTable(list, compact=false) {
