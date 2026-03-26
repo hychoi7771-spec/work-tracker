@@ -410,6 +410,9 @@ tr:hover td { background: #fafffe; }
     <div class="nav-item" onclick="showView('projects')" id="nav-projects">
       <span class="nav-icon">📁</span><span class="nav-label">프로젝트</span>
     </div>
+    <div class="nav-item" onclick="showView('admin')" id="nav-admin" style="display:none;border-top:1px solid var(--border);margin-top:8px;">
+      <span class="nav-icon">🛡️</span><span class="nav-label">관리자</span><span class="nav-badge" id="badge-online" style="background:#a8d8b9;color:#1a5e30;"></span>
+    </div>
   </div>
   <div class="sidebar-footer">
     <div class="collapse-btn" onclick="toggleSidebar()">
@@ -808,24 +811,94 @@ let selectedTaskId = null;
 function signInWithGoogle() {
   auth.signInWithPopup(googleProvider).catch(e => toast('로그인 실패: ' + e.message, 'error'));
 }
+let isAdmin = false;
+let heartbeatTimer = null;
+
 function confirmSignOut() {
-  if (confirm('로그아웃 하시겠습니까?')) auth.signOut();
+  if (confirm('로그아웃 하시겠습니까?')) {
+    updatePresence(false);
+    recordAuthEvent('logout');
+    stopHeartbeat();
+    auth.signOut();
+  }
 }
-auth.onAuthStateChanged(user => {
+
+// ── 접속 현황 추적 ──
+async function updatePresence(online) {
+  if (!currentUser) return;
+  try {
+    await db.collection('presence').doc(currentUser.uid).set({
+      uid: currentUser.uid,
+      name: currentUser.displayName || currentUser.email,
+      email: currentUser.email,
+      photo: currentUser.photoURL || '',
+      online,
+      lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch(e) {}
+}
+function startHeartbeat() {
+  updatePresence(true);
+  heartbeatTimer = setInterval(() => updatePresence(true), 30000);
+}
+function stopHeartbeat() {
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+}
+
+// ── 로그인 기록 ──
+async function recordAuthEvent(action) {
+  if (!currentUser) return;
+  try {
+    await db.collection('loginHistory').add({
+      uid: currentUser.uid,
+      name: currentUser.displayName || currentUser.email,
+      email: currentUser.email,
+      photo: currentUser.photoURL || '',
+      action,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      device: navigator.userAgent.substring(0, 120)
+    });
+  } catch(e) {}
+}
+
+// ── 관리자 확인 ──
+async function checkAndSetAdmin() {
+  try {
+    const settings = await db.collection('settings').doc('workspace').get();
+    if (!settings.exists || !settings.data().adminUid) {
+      await db.collection('settings').doc('workspace').set({ adminUid: currentUser.uid, adminEmail: currentUser.email }, { merge: true });
+      isAdmin = true;
+    } else {
+      isAdmin = settings.data().adminUid === currentUser.uid;
+    }
+    const adminNav = document.getElementById('nav-admin');
+    if (adminNav) adminNav.style.display = isAdmin ? 'flex' : 'none';
+  } catch(e) {}
+}
+
+auth.onAuthStateChanged(async user => {
   const loginScreen = document.getElementById('login-screen');
   if (user) {
     currentUser = user;
     loginScreen.style.display = 'none';
-    // 유저 프로필 표시
     const photo = document.getElementById('user-photo');
     const name = document.getElementById('user-name');
     if (user.photoURL) { photo.src = user.photoURL; photo.style.display = 'block'; }
     name.textContent = user.displayName || user.email;
     setupRealtimeListeners();
+    await checkAndSetAdmin();
+    startHeartbeat();
+    recordAuthEvent('login');
+    // 탭 닫힐 때 오프라인 처리
+    window.addEventListener('beforeunload', () => { updatePresence(false); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) updatePresence(false); else updatePresence(true);
+    });
   } else {
     currentUser = null;
+    isAdmin = false;
     loginScreen.style.display = 'flex';
-    // 리스너 해제
+    stopHeartbeat();
     unsubscribers.forEach(fn => fn());
     unsubscribers = [];
     tasks = []; team = []; tags = [];
@@ -945,6 +1018,7 @@ function showView(v) {
   else if (v==='team') renderTeam(content);
   else if (v==='tags') renderTagsView(content);
   else if (v==='projects') renderProjectsView(content);
+  else if (v==='admin') renderAdminView(content);
   updateNavBadges();
   closeMobileMenu();
 }
@@ -1516,6 +1590,138 @@ function updateNavBadges() {
   const kanbanEl = document.getElementById('badge-kanban');
   const inProgress = tasks.filter(t=>t.status==='진행중').length;
   if (kanbanEl) kanbanEl.textContent = inProgress||'';
+}
+
+// ══════════════════════════════════════
+//  관리자 대시보드
+// ══════════════════════════════════════
+let presenceData = [], loginHistoryData = [], adminUnsubscribers = [];
+
+function renderAdminView(el) {
+  if (!isAdmin) { el.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><div>관리자만 접근할 수 있습니다</div></div>`; return; }
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+      <div class="card"><div class="stat-label">현재 접속자</div><div class="stat-value" id="admin-online-count" style="color:#2d6e4a;">-</div></div>
+      <div class="card"><div class="stat-label">전체 로그인 기록</div><div class="stat-value" id="admin-history-count" style="color:#5050a0;">-</div></div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div style="font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+        🟢 실시간 접속 현황
+        <span style="font-size:11px;font-weight:400;color:var(--text-light);">30초마다 자동 갱신</span>
+      </div>
+      <div id="admin-presence-list">로딩 중...</div>
+    </div>
+    <div class="card">
+      <div style="font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;">
+        📋 로그인 기록
+        <select id="admin-history-filter" onchange="renderHistoryTable()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;">
+          <option value="50">최근 50건</option>
+          <option value="100">최근 100건</option>
+          <option value="all">전체</option>
+        </select>
+      </div>
+      <div id="admin-history-list">로딩 중...</div>
+    </div>
+  `;
+  setupAdminListeners();
+}
+
+function setupAdminListeners() {
+  adminUnsubscribers.forEach(fn=>fn());
+  adminUnsubscribers = [];
+
+  // 접속 현황 실시간 리스너
+  adminUnsubscribers.push(db.collection('presence').onSnapshot(snap => {
+    presenceData = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderPresenceList();
+    const onlineCount = presenceData.filter(p=>isOnline(p)).length;
+    const el = document.getElementById('admin-online-count');
+    if (el) el.textContent = onlineCount;
+    const badge = document.getElementById('badge-online');
+    if (badge) badge.textContent = onlineCount||'';
+  }));
+
+  // 로그인 기록 실시간 리스너 (최근 100건)
+  adminUnsubscribers.push(db.collection('loginHistory').orderBy('timestamp','desc').limit(100).onSnapshot(snap => {
+    loginHistoryData = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderHistoryTable();
+    const el = document.getElementById('admin-history-count');
+    if (el) el.textContent = loginHistoryData.length + '+';
+  }));
+}
+
+function isOnline(p) {
+  if (!p.online) return false;
+  if (!p.lastSeen) return false;
+  const lastSeen = p.lastSeen.toDate ? p.lastSeen.toDate() : new Date(p.lastSeen);
+  return (Date.now() - lastSeen.getTime()) < 120000; // 2분 이내
+}
+
+function renderPresenceList() {
+  const el = document.getElementById('admin-presence-list');
+  if (!el) return;
+  if (!presenceData.length) { el.innerHTML = `<div style="color:var(--text-light);font-size:13px;">접속 기록이 없습니다</div>`; return; }
+  const sorted = [...presenceData].sort((a,b)=>isOnline(b)-isOnline(a));
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="background:var(--primary-light);">
+      <th style="padding:8px 12px;text-align:left;">상태</th>
+      <th style="padding:8px 12px;text-align:left;">이름</th>
+      <th style="padding:8px 12px;text-align:left;">이메일</th>
+      <th style="padding:8px 12px;text-align:left;">마지막 접속</th>
+    </tr></thead>
+    <tbody>${sorted.map(p=>{
+      const online = isOnline(p);
+      const lastSeen = p.lastSeen?.toDate ? p.lastSeen.toDate() : (p.lastSeen ? new Date(p.lastSeen) : null);
+      const timeStr = lastSeen ? formatRelativeTime(lastSeen) : '-';
+      return `<tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:10px 12px;"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:${online?'#1a6e3a':'#888'};">
+          <span style="width:8px;height:8px;border-radius:50%;background:${online?'#4caf50':'#ccc'};${online?'box-shadow:0 0 6px #4caf50':''}"></span>
+          ${online?'접속 중':'오프라인'}
+        </span></td>
+        <td style="padding:10px 12px;font-weight:600;">${p.photo?`<img src="${p.photo}" style="width:24px;height:24px;border-radius:50%;margin-right:6px;vertical-align:middle;">`:''}${p.name||'-'}</td>
+        <td style="padding:10px 12px;color:var(--text-light);">${p.email||'-'}</td>
+        <td style="padding:10px 12px;color:var(--text-light);">${timeStr}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function renderHistoryTable() {
+  const el = document.getElementById('admin-history-list');
+  if (!el) return;
+  if (!loginHistoryData.length) { el.innerHTML = `<div style="color:var(--text-light);font-size:13px;">로그인 기록이 없습니다</div>`; return; }
+  const filter = document.getElementById('admin-history-filter')?.value || '50';
+  const data = filter === 'all' ? loginHistoryData : loginHistoryData.slice(0, parseInt(filter));
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="background:var(--primary-light);">
+      <th style="padding:8px 12px;text-align:left;">구분</th>
+      <th style="padding:8px 12px;text-align:left;">이름</th>
+      <th style="padding:8px 12px;text-align:left;">이메일</th>
+      <th style="padding:8px 12px;text-align:left;">시각</th>
+      <th style="padding:8px 12px;text-align:left;">기기</th>
+    </tr></thead>
+    <tbody>${data.map(h=>{
+      const ts = h.timestamp?.toDate ? h.timestamp.toDate() : null;
+      const timeStr = ts ? ts.toLocaleString('ko-KR') : '-';
+      const isLogin = h.action === 'login';
+      const device = (h.device||'').includes('Mobile') ? '📱 모바일' : '💻 PC';
+      return `<tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:9px 12px;"><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:${isLogin?'#d4f0de':'#fce4e8'};color:${isLogin?'#1a6e3a':'#8b2040'};">${isLogin?'로그인':'로그아웃'}</span></td>
+        <td style="padding:9px 12px;font-weight:600;">${h.photo?`<img src="${h.photo}" style="width:20px;height:20px;border-radius:50%;margin-right:6px;vertical-align:middle;">`:''}${h.name||'-'}</td>
+        <td style="padding:9px 12px;color:var(--text-light);font-size:12px;">${h.email||'-'}</td>
+        <td style="padding:9px 12px;color:var(--text-light);font-size:12px;">${timeStr}</td>
+        <td style="padding:9px 12px;color:var(--text-light);font-size:12px;">${device}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function formatRelativeTime(date) {
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 60) return '방금 전';
+  if (diff < 3600) return `${Math.floor(diff/60)}분 전`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}시간 전`;
+  return date.toLocaleString('ko-KR');
 }
 
 // ══════════════════════════════════════
