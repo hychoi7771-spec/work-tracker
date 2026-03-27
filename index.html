@@ -1759,225 +1759,259 @@ function formatRelativeTime(date) {
 // ══════════════════════════════════════
 //  마인드맵
 // ══════════════════════════════════════
-let mindmapMode = 'category'; // 'category' | 'project'
-let mmScale = 1, mmTx = 0, mmTy = 0, mmDragging = false, mmDragStart = null;
-let mmSelectedGroup = null;
+// ── 마인드맵 상태 ──
+let mmMode = 'category';
+let mmSc = 1, mmPx = 0, mmPy = 0;
+let mmIsDrag = false, mmDx = 0, mmDy = 0;
+let mmCollapsed = {}, mmTaskMap = {}, mmGroupMap = {};
 
 function renderMindmap(el) {
-  mmSelectedGroup = null;
+  mmCollapsed={}; mmTaskMap={}; mmGroupMap={}; mmSc=1; mmPx=0; mmPy=0;
   el.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-      <span style="font-size:13px;font-weight:600;">그룹 기준:</span>
-      <button class="btn btn-sm ${mindmapMode==='category'?'btn-primary':'btn-ghost'}" onclick="mindmapMode='category';mmSelectedGroup=null;renderMindmap(document.getElementById('content'))">🏷️ 카테고리별</button>
-      <button class="btn btn-sm ${mindmapMode==='project'?'btn-primary':'btn-ghost'}" onclick="mindmapMode='project';mmSelectedGroup=null;renderMindmap(document.getElementById('content'))">📁 프로젝트별</button>
-      <div style="margin-left:auto;display:flex;gap:6px;">
-        <button class="btn btn-ghost btn-sm" onclick="mmZoom(1.25)" title="확대">🔍+</button>
-        <button class="btn btn-ghost btn-sm" onclick="mmZoom(0.8)" title="축소">🔍−</button>
-        <button class="btn btn-ghost btn-sm" onclick="mmFit()" title="화면에 맞추기">⊡ 맞춤</button>
-        <button class="btn btn-ghost btn-sm" onclick="mmReset()" title="초기화">↺ 초기화</button>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+      <div style="display:flex;gap:4px;background:var(--bg);border-radius:8px;padding:3px;">
+        <button class="btn btn-sm ${mmMode==='category'?'btn-primary':'btn-ghost'}" onclick="mmSetMode('category')">🏷️ 카테고리별</button>
+        <button class="btn btn-sm ${mmMode==='project'?'btn-primary':'btn-ghost'}" onclick="mmSetMode('project')">📁 프로젝트별</button>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:4px;">
+        <button class="btn btn-ghost btn-sm" onclick="mmZoomBtn(1.2)">＋확대</button>
+        <button class="btn btn-ghost btn-sm" onclick="mmZoomBtn(0.8)">－축소</button>
+        <button class="btn btn-ghost btn-sm" onclick="mmFitScreen()">⊡ 맞춤</button>
+        <button class="btn btn-ghost btn-sm" onclick="mmCollapseAll()">▲ 접기</button>
+        <button class="btn btn-ghost btn-sm" onclick="mmExpandAll()">▼ 펼치기</button>
       </div>
     </div>
     <div style="display:flex;gap:12px;align-items:flex-start;">
-      <div id="mindmap-wrap" style="flex:1;background:#fafcfb;border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;position:relative;cursor:grab;user-select:none;" onmousedown="mmDragStart=event;mmDragging=false;" onmousemove="mmOnDrag(event)" onmouseup="mmDragging=false" onmouseleave="mmDragging=false" onwheel="mmOnWheel(event)">
-        <svg id="mm-svg" style="display:block;" xmlns="http://www.w3.org/2000/svg">
+      <div id="mm-wrap" style="flex:1;height:620px;background:#f7fbf8;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;position:relative;cursor:grab;user-select:none;"
+        onmousedown="mmMouseDown(event)" onmousemove="mmMouseMove(event)" onmouseup="mmMouseUp(event)"
+        onmouseleave="mmMouseUp(event)" onwheel="mmWheel(event)">
+        <svg id="mm-svg" style="position:absolute;top:0;left:0;" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <filter id="mm-shadow"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-opacity="0.12"/></filter>
-            <filter id="mm-shadow2"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.1"/></filter>
+            <filter id="mm-s1"><feDropShadow dx="0" dy="2" stdDeviation="5" flood-opacity="0.13"/></filter>
+            <filter id="mm-s2"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.09"/></filter>
           </defs>
-          <g id="mm-viewport"></g>
+          <g id="mm-vp"></g>
         </svg>
       </div>
-      <div id="mm-side" style="width:220px;min-width:220px;display:none;"></div>
+      <div id="mm-panel" style="width:0;min-width:0;overflow:hidden;transition:width .25s,min-width .25s;"></div>
     </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--text-light);text-align:center;">휠=줌 · 드래그=이동 · 그룹 클릭=접기/펼치기 · 업무 클릭=상세</div>
   `;
-  drawMindmap();
+  mmDraw();
 }
 
-function drawMindmap() {
-  const wrap = document.getElementById('mindmap-wrap');
-  const viewport = document.getElementById('mm-viewport');
-  const svg = document.getElementById('mm-svg');
-  if (!wrap || !viewport || !svg) return;
+function mmSetMode(m) { mmMode=m; mmCollapsed={}; renderMindmap(document.getElementById('content')); }
 
-  const pastelColors = ['#a8d8b9','#f5c6d0','#c5b8e8','#f9e4b7','#b8d8f5','#f5c8a8','#d4e8c8','#e8c8e8','#c8e8f5','#f5d8b8'];
-  const statusColor = {대기:'#ccd8e8',진행중:'#a8d8b9',검토중:'#f9e4b7',완료:'#b8e8c0'};
-  const statusLabel = {대기:'대기',진행중:'진행',검토중:'검토',완료:'완료'};
-
-  // 그룹핑
-  const grouped = {};
-  if (mindmapMode === 'project') {
-    tasks.forEach(t => {
-      const p = projects.find(p=>p.id===t.project);
-      const key = p ? p.id : '__none__';
-      const label = p ? p.name : '프로젝트 없음';
-      if (!grouped[key]) grouped[key] = { label, color: p?.color||'#ccc', tasks:[] };
-      grouped[key].tasks.push(t);
+function mmBuildGroups() {
+  const pastel=['#a8d8b9','#f5c6d0','#c5b8e8','#f9e4b7','#b8d8f5','#f5c8a8','#d4e8c8','#e8c8e8','#b8e8e8','#f5d8b8'];
+  const map={};
+  if (mmMode==='project') {
+    tasks.forEach(t=>{
+      const p=projects.find(p=>p.id===t.project);
+      const key=p?p.id:'__none__';
+      if (!map[key]) map[key]={key,label:p?p.name:'프로젝트 없음',color:p?.color||'',tasks:[]};
+      map[key].tasks.push(t);
     });
   } else {
-    tasks.forEach(t => {
-      const key = t.category || '미분류';
-      if (!grouped[key]) grouped[key] = { label: key, color:'', tasks:[] };
-      grouped[key].tasks.push(t);
+    tasks.forEach(t=>{
+      const key=t.category||'미분류';
+      if (!map[key]) map[key]={key,label:key,color:'',tasks:[]};
+      map[key].tasks.push(t);
     });
-    let ci=0;
-    Object.values(grouped).forEach(g => { if(!g.color) g.color=pastelColors[ci++%pastelColors.length]; });
   }
+  const list=Object.values(map).sort((a,b)=>b.tasks.length-a.tasks.length);
+  list.forEach((g,i)=>{ if(!g.color) g.color=pastel[i%pastel.length]; });
+  return list;
+}
 
-  const groupEntries = Object.entries(grouped);
-  if (!groupEntries.length) {
-    viewport.innerHTML = '';
-    svg.setAttribute('width','400'); svg.setAttribute('height','200');
-    viewport.innerHTML = `<text x="200" y="100" text-anchor="middle" font-size="14" fill="#aaa">등록된 업무가 없습니다</text>`;
-    return;
-  }
+function mmCalcLayout(groups) {
+  const TH=46, GH=50, GW=150, TW=164, GAP=24, R1=240, TX=430;
+  const left=[], right=[];
+  groups.forEach((g,i)=>(i%2===0?left:right).push(g));
 
-  const N = groupEntries.length;
-  const R1 = Math.max(160, N * 38);
-  const maxTasksInGroup = Math.max(...groupEntries.map(([,g])=>g.tasks.length));
-  const R2 = Math.max(120, maxTasksInGroup * 22);
-
-  let allX = [0], allY = [0];
-  const groupPos = [], taskPos = [];
-
-  groupEntries.forEach(([key, group], gi) => {
-    const angle = (2*Math.PI*gi/N) - Math.PI/2;
-    const gx = R1*Math.cos(angle), gy = R1*Math.sin(angle);
-    groupPos.push({key, group, angle, gx, gy});
-    allX.push(gx); allY.push(gy);
-
-    const M = group.tasks.length;
-    const maxShow = 10;
-    group.tasks.slice(0, maxShow).forEach((t, ti) => {
-      const spread = Math.min((Math.PI*1.4)/Math.max(N,2), Math.PI*0.8);
-      const step = M>1 ? spread/(Math.min(M,maxShow)-1) : 0;
-      const tAngle = angle - spread/2 + step*ti;
-      const tx = gx + R2*Math.cos(tAngle), ty = gy + R2*Math.sin(tAngle);
-      taskPos.push({t, tx, ty, gx, gy, color: group.color});
-      allX.push(tx); allY.push(ty);
+  function side(list, dir) {
+    let totalH=0;
+    list.forEach(g=>{
+      const shown=mmCollapsed[g.key]?0:Math.min(g.tasks.length,10);
+      totalH+=Math.max(GH, shown*TH)+GAP;
     });
+    let y=-totalH/2, result=[];
+    list.forEach(g=>{
+      const shown=mmCollapsed[g.key]?0:Math.min(g.tasks.length,10);
+      const blockH=Math.max(GH, shown*TH);
+      const gy=y+blockH/2;
+      const tnodes=[];
+      if (!mmCollapsed[g.key]) {
+        for (let i=0;i<shown;i++) tnodes.push({t:g.tasks[i],x:dir*TX,y:y+i*TH+TH/2});
+        if (g.tasks.length>10) tnodes.push({more:g.tasks.length-10,x:dir*TX,y:y+shown*TH+TH/2});
+      }
+      result.push({...g,gx:dir*R1,gy,dir,tnodes});
+      y+=blockH+GAP;
+    });
+    return result;
+  }
+  return [...side(left,-1),...side(right,1)];
+}
+
+function mmGetBounds(layout) {
+  let xs=[0],ys=[0];
+  layout.forEach(g=>{
+    xs.push(g.gx-80,g.gx+80); ys.push(g.gy-28,g.gy+28);
+    g.tnodes.forEach(n=>{xs.push(n.x-90,n.x+90);ys.push(n.y-24,n.y+24);});
   });
+  const minX=Math.min(...xs)-60,maxX=Math.max(...xs)+60,minY=Math.min(...ys)-60,maxY=Math.max(...ys)+60;
+  return {minX,maxX,minY,maxY,w:maxX-minX,h:maxY-minY,cx:(minX+maxX)/2,cy:(minY+maxY)/2};
+}
 
-  // 바운딩박스 + 패딩으로 viewBox 계산
-  const pad = 90;
-  const minX=Math.min(...allX)-pad, maxX=Math.max(...allX)+pad;
-  const minY=Math.min(...allY)-pad, maxY=Math.max(...allY)+pad;
-  const vw=maxX-minX, vh=maxY-minY;
-  const ox=-minX, oy=-minY; // 좌표 오프셋
+function mmDraw() {
+  const wrap=document.getElementById('mm-wrap');
+  const svg=document.getElementById('mm-svg');
+  const vp=document.getElementById('mm-vp');
+  if (!wrap||!svg||!vp) return;
+  const ww=wrap.clientWidth||800, wh=wrap.clientHeight||620;
+  svg.setAttribute('width',ww); svg.setAttribute('height',wh);
 
-  // 컨테이너 높이
-  const wrapH = Math.max(560, vh * 0.85);
-  wrap.style.height = wrapH + 'px';
+  const groups=mmBuildGroups();
+  mmTaskMap={}; mmGroupMap={};
+  if (!groups.length) { vp.innerHTML=`<text x="${ww/2}" y="${wh/2}" text-anchor="middle" font-size="14" fill="#aaa">등록된 업무가 없습니다</text>`; return; }
 
-  let edges='', nodes='';
+  const layout=mmCalcLayout(groups);
+  const SC={대기:'#c8d8ea',진행중:'#a8d8b9',검토중:'#f9e4b7',완료:'#b8eac0'};
+  const PC={낮음:'#d5e8d5',보통:'#b8d8f5',높음:'#f5d8b8',긴급:'#f5b8b8'};
+  const done=tasks.filter(t=>t.status==='완료').length;
+  let ed='',nd='';
 
   // 중심 노드
-  const done = tasks.filter(t=>t.status==='완료').length;
-  nodes += `<g>
-    <circle cx="${ox}" cy="${oy}" r="52" fill="#a8d8b9" stroke="#6ab88a" stroke-width="2.5" filter="url(#mm-shadow)"/>
-    <text x="${ox}" y="${oy-10}" text-anchor="middle" font-size="13" font-weight="800" fill="#1a4a2e">업무</text>
-    <text x="${ox}" y="${oy+8}" text-anchor="middle" font-size="13" font-weight="800" fill="#1a4a2e">현황표</text>
-    <text x="${ox}" y="${oy+26}" text-anchor="middle" font-size="11" fill="#2d6e4a">총 ${tasks.length}건 · 완료 ${done}</text>
+  nd+=`<g><circle r="56" fill="#a8d8b9" stroke="#6ab88a" stroke-width="2.5" filter="url(#mm-s1)"/>
+    <text y="-12" text-anchor="middle" font-size="13" font-weight="800" fill="#1a4a2e">업무현황표</text>
+    <text y="7" text-anchor="middle" font-size="11" fill="#2d6e4a">총 ${tasks.length}건</text>
+    <text y="23" text-anchor="middle" font-size="10" fill="#3a7a5a">완료 ${done}건 (${tasks.length?Math.round(done/tasks.length*100):0}%)</text>
   </g>`;
 
-  // 업무 노드 먼저 (엣지 위에 오도록)
-  taskPos.forEach(({t, tx, ty, gx, gy, color}) => {
-    const sColor = statusColor[t.status]||'#ddd';
-    const tLabel = t.title.length>13 ? t.title.substring(0,12)+'…' : t.title;
-    const assignee = team.find(m=>m.id===t.assignee);
-    const dim = mmSelectedGroup && mmSelectedGroup !== gx+','+gy ? '0.25' : '1';
-    edges += `<line x1="${gx+ox}" y1="${gy+oy}" x2="${tx+ox}" y2="${ty+oy}" stroke="${color}" stroke-width="1.2" opacity="${dim === '1' ? '0.5' : '0.1'}"/>`;
-    nodes += `<g style="cursor:pointer;opacity:${dim};" onclick="openDetail('${t.id}')">
-      <rect x="${tx+ox-46}" y="${ty+oy-20}" width="92" height="40" rx="10" fill="${sColor}" stroke="${color}" stroke-width="1.5" filter="url(#mm-shadow2)"/>
-      <text x="${tx+ox}" y="${ty+oy-6}" text-anchor="middle" font-size="10" font-weight="700" fill="#2a2a2a">${tLabel}</text>
-      <text x="${tx+ox}" y="${ty+oy+9}" text-anchor="middle" font-size="9" fill="#555">${assignee?assignee.name+' · ':''}<tspan font-weight="600">${t.progress||0}%</tspan></text>
+  layout.forEach(g=>{
+    mmGroupMap[g.key]=g;
+    const dir=g.dir, col=mmCollapsed[g.key];
+    const doneC=g.tasks.filter(t=>t.status==='완료').length;
+    const avg=g.tasks.length?Math.round(g.tasks.reduce((s,t)=>s+(t.progress||0),0)/g.tasks.length):0;
+    const lbl=g.label.length>11?g.label.substring(0,10)+'…':g.label;
+
+    // 중심→그룹
+    const cpx=dir*120;
+    ed+=`<path d="M0,0 C${cpx},0 ${cpx},${g.gy} ${g.gx},${g.gy}" fill="none" stroke="${g.color}" stroke-width="2.5" opacity="0.55"/>`;
+
+    // 그룹 노드 (rounded rect)
+    nd+=`<g class="mm-group" data-key="${g.key}" style="cursor:pointer;">
+      <rect x="${g.gx-75}" y="${g.gy-25}" width="150" height="50" rx="14" fill="${g.color}" stroke="rgba(0,0,0,.1)" stroke-width="1.5" filter="url(#mm-s1)"/>
+      <text x="${g.gx}" y="${g.gy-7}" text-anchor="middle" font-size="12" font-weight="800" fill="#222">${lbl}</text>
+      <text x="${g.gx}" y="${g.gy+10}" text-anchor="middle" font-size="10" fill="#444">${doneC}/${g.tasks.length}완료 · ${avg}%</text>
+      <text x="${g.gx+(dir*62)}" y="${g.gy+5}" text-anchor="middle" font-size="13" fill="#666">${col?'▸':'▾'}</text>
     </g>`;
+
+    // 업무 노드
+    g.tnodes.forEach(tn=>{
+      if (tn.more) {
+        const mx=tn.x-dir*82;
+        ed+=`<path d="M${g.gx+dir*75},${g.gy} C${g.gx+dir*120},${g.gy} ${g.gx+dir*120},${tn.y} ${mx},${tn.y}" fill="none" stroke="${g.color}" stroke-width="1" stroke-dasharray="5" opacity="0.4"/>`;
+        nd+=`<g class="mm-more" data-key="${g.key}" style="cursor:pointer;">
+          <rect x="${tn.x-dir*82}" y="${tn.y-14}" width="80" height="28" rx="14" fill="#eee" stroke="#ddd" stroke-width="1.2"/>
+          <text x="${tn.x-dir*42}" y="${tn.y+5}" text-anchor="middle" font-size="10" font-weight="700" fill="#888">+${tn.more}건 더</text>
+        </g>`;
+        return;
+      }
+      const t=tn.t; mmTaskMap[t.id]=t;
+      const sc=SC[t.status]||'#eee';
+      const lbl2=t.title.length>16?t.title.substring(0,15)+'…':t.title;
+      const asgn=team.find(m=>m.id===t.assignee);
+      const tx0=tn.x-dir*82;
+      ed+=`<path d="M${g.gx+dir*75},${g.gy} C${g.gx+dir*120},${g.gy} ${g.gx+dir*120},${tn.y} ${tx0},${tn.y}" fill="none" stroke="${g.color}" stroke-width="1.2" opacity="0.4"/>`;
+      nd+=`<g class="mm-task" data-id="${t.id}" style="cursor:pointer;">
+        <rect x="${tn.x-dir*82}" y="${tn.y-19}" width="164" height="38" rx="10" fill="${sc}" stroke="rgba(0,0,0,.07)" stroke-width="1" filter="url(#mm-s2)"/>
+        <text x="${tn.x-dir*82+82}" y="${tn.y-4}" text-anchor="middle" font-size="11" font-weight="700" fill="#222">${lbl2}</text>
+        <text x="${tn.x-dir*82+82}" y="${tn.y+12}" text-anchor="middle" font-size="9.5" fill="#555">${asgn?asgn.name+' · ':''}${t.progress||0}% <tspan fill="${t.status==='완료'?'#2a8a4a':t.status==='진행중'?'#2a6a8a':'#888'}">${t.status}</tspan></text>
+      </g>`;
+    });
   });
 
-  // 그룹 노드
-  groupPos.forEach(({key, group, angle, gx, gy}) => {
-    const done = group.tasks.filter(t=>t.status==='완료').length;
-    const avg = group.tasks.length ? Math.round(group.tasks.reduce((s,t)=>s+(t.progress||0),0)/group.tasks.length) : 0;
-    const gLabel = group.label.length>9 ? group.label.substring(0,8)+'…' : group.label;
-    const dim = mmSelectedGroup && mmSelectedGroup !== gx+','+gy ? '0.3' : '1';
-    const stroke = mmSelectedGroup===gx+','+gy ? '#333' : '#fff';
-    const strokeW = mmSelectedGroup===gx+','+gy ? '3' : '2';
-
-    // 중심→그룹 곡선
-    const mx=(ox+gx+ox)/2, my=(oy+gy+oy)/2;
-    edges = `<path d="M${ox},${oy} Q${mx+30*Math.sin(angle)},${my-30*Math.cos(angle)} ${gx+ox},${gy+oy}" fill="none" stroke="${group.color}" stroke-width="2.5" opacity="${dim==='1'?'0.7':'0.15'}"/>` + edges;
-
-    nodes += `<g style="cursor:pointer;opacity:${dim};" onclick="mmSelectGroup('${gx},${gy}','${key}',${JSON.stringify(group).replace(/'/g,'\\\'')})">
-      <circle cx="${gx+ox}" cy="${gy+oy}" r="40" fill="${group.color}" stroke="${stroke}" stroke-width="${strokeW}" filter="url(#mm-shadow)"/>
-      <text x="${gx+ox}" y="${gy+oy-10}" text-anchor="middle" font-size="11" font-weight="800" fill="#2a2a2a">${gLabel}</text>
-      <text x="${gx+ox}" y="${gy+oy+5}" text-anchor="middle" font-size="10" fill="#444">${done}/${group.tasks.length}완료</text>
-      <text x="${gx+ox}" y="${gy+oy+19}" text-anchor="middle" font-size="10" font-weight="700" fill="#555">${avg}%</text>
-    </g>`;
-  });
-
-  viewport.innerHTML = edges + nodes;
-  svg.setAttribute('width', vw); svg.setAttribute('height', vh);
-  svg.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
-  mmScale=1; mmTx=0; mmTy=0;
-  mmApplyTransform();
+  vp.innerHTML=ed+nd;
+  // 이벤트 위임
+  vp.onclick=mmHandleClick;
+  // 자동 맞춤
+  mmFitScreen();
 }
 
-function mmSelectGroup(posKey, key, group) {
-  const side = document.getElementById('mm-side');
-  if (!side) return;
-  mmSelectedGroup = mmSelectedGroup===posKey ? null : posKey;
-  drawMindmap();
-  if (!mmSelectedGroup) { side.style.display='none'; return; }
+function mmHandleClick(e) {
+  const tEl=e.target.closest('.mm-task');
+  if (tEl) { const t=mmTaskMap[tEl.dataset.id]; if(t) mmShowPanel(t); return; }
+  const gEl=e.target.closest('.mm-group');
+  if (gEl) { mmCollapsed[gEl.dataset.key]=!mmCollapsed[gEl.dataset.key]; mmDraw(); return; }
+  const mEl=e.target.closest('.mm-more');
+  if (mEl) {
+    const g=mmGroupMap[mEl.dataset.key];
+    if (g) { if(mmMode==='category'){filterCategory=g.label;filterProject='';}else{filterProject=g.key==='__none__'?'':g.key;filterCategory='';} taskGroupMode='list'; showView('tasks'); }
+  }
+}
 
-  const statusColor = {대기:'#ccd8e8',진행중:'#a8d8b9',검토중:'#f9e4b7',완료:'#b8e8c0'};
-  const avg = group.tasks.length ? Math.round(group.tasks.reduce((s,t)=>s+(t.progress||0),0)/group.tasks.length):0;
-  side.style.display='block';
-  side.innerHTML=`
-    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:16px;position:sticky;top:0;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-        <div style="width:14px;height:14px;border-radius:50%;background:${group.color};flex-shrink:0;"></div>
-        <span style="font-weight:700;font-size:14px;">${group.label}</span>
-        <button class="btn-icon" onclick="mmSelectedGroup=null;document.getElementById('mm-side').style.display='none';drawMindmap()" style="margin-left:auto;">✕</button>
+function mmShowPanel(t) {
+  const panel=document.getElementById('mm-panel');
+  if (!panel) return;
+  const a=team.find(m=>m.id===t.assignee);
+  const SC={대기:'#c8d8ea',진행중:'#a8d8b9',검토중:'#f9e4b7',완료:'#b8eac0'};
+  panel.style.width='230px'; panel.style.minWidth='230px';
+  panel.innerHTML=`<div style="background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span style="font-size:13px;font-weight:800;">업무 상세</span>
+      <button class="btn-icon" onclick="document.getElementById('mm-panel').style.width='0';document.getElementById('mm-panel').style.minWidth='0';">✕</button>
+    </div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:10px;line-height:1.4;">${t.title}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+      <span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:${SC[t.status]||'#eee'}">${t.status}</span>
+      <span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:var(--warning)">${t.priority}</span>
+    </div>
+    <div style="margin-bottom:10px;">
+      <div style="font-size:11px;color:var(--text-light);margin-bottom:4px;">진행률 <strong>${t.progress||0}%</strong></div>
+      <div style="background:var(--border);border-radius:99px;height:7px;overflow:hidden;">
+        <div style="height:100%;background:var(--primary);width:${t.progress||0}%;border-radius:99px;"></div>
       </div>
-      <div style="background:var(--border);border-radius:99px;height:6px;margin-bottom:8px;overflow:hidden;">
-        <div style="height:100%;background:${group.color};width:${avg}%;border-radius:99px;"></div>
-      </div>
-      <div style="font-size:11px;color:var(--text-light);margin-bottom:14px;">평균 진행률 ${avg}% · ${group.tasks.filter(t=>t.status==='완료').length}/${group.tasks.length}건 완료</div>
-      <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto;">
-        ${group.tasks.map(t=>{
-          const a=team.find(m=>m.id===t.assignee);
-          return `<div style="padding:10px;border-radius:8px;background:${statusColor[t.status]||'#eee'};cursor:pointer;" onclick="openDetail('${t.id}')">
-            <div style="font-size:12px;font-weight:700;margin-bottom:4px;">${t.title}</div>
-            <div style="font-size:11px;color:#555;">${a?a.name+' · ':''}${t.progress||0}% · ${t.status}</div>
-          </div>`;
-        }).join('')}
-      </div>
-      <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:12px;" onclick="filterCategory='${mindmapMode==='category'?group.label:''}';filterProject='${mindmapMode==='project'&&key!=='__none__'?key:''}';taskGroupMode='list';showView('tasks')">업무 목록 보기 →</button>
-    </div>`;
+    </div>
+    ${a?`<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--text-light);">담당자</span> <strong>${a.name}</strong></div>`:''}
+    ${t.category?`<div style="font-size:12px;margin-bottom:6px;"><span style="color:var(--text-light);">카테고리</span> <strong>${t.category}</strong></div>`:''}
+    ${t.end?`<div style="font-size:12px;margin-bottom:10px;"><span style="color:var(--text-light);">마감일</span> <strong>${t.end}</strong></div>`:''}
+    ${t.desc?`<div style="font-size:12px;margin-bottom:10px;color:#444;line-height:1.5;">${t.desc}</div>`:''}
+    <button class="btn btn-primary btn-sm" style="width:100%;" onclick="openEditTask('${t.id}')">✏️ 수정하기</button>
+  </div>`;
 }
 
-function mmApplyTransform() {
-  const vp = document.getElementById('mm-viewport');
-  const svg = document.getElementById('mm-svg');
-  if (!vp||!svg) return;
-  const w=parseFloat(svg.getAttribute('width')||900), h=parseFloat(svg.getAttribute('height')||600);
-  const wrap=document.getElementById('mindmap-wrap');
-  const ww=wrap?wrap.clientWidth:900, wh=wrap?wrap.clientHeight:560;
-  const baseTx=(ww-w*mmScale)/2+mmTx, baseTy=(wh-h*mmScale)/2+mmTy;
-  vp.setAttribute('transform',`translate(${baseTx},${baseTy}) scale(${mmScale})`);
-  svg.setAttribute('width',ww); svg.setAttribute('height',wh);
-  svg.setAttribute('viewBox',`0 0 ${ww} ${wh}`);
+function mmApplyVP() {
+  const vp=document.getElementById('mm-vp');
+  const wrap=document.getElementById('mm-wrap');
+  if (!vp||!wrap) return;
+  const ww=wrap.clientWidth, wh=wrap.clientHeight;
+  vp.setAttribute('transform',`translate(${ww/2+mmPx},${wh/2+mmPy}) scale(${mmSc})`);
 }
-function mmZoom(f) { mmScale=Math.min(3,Math.max(0.3,mmScale*f)); mmApplyTransform(); }
-function mmFit() { mmScale=1; mmTx=0; mmTy=0; mmApplyTransform(); }
-function mmReset() { mmScale=1; mmTx=0; mmTy=0; drawMindmap(); }
-function mmOnWheel(e) { e.preventDefault(); mmZoom(e.deltaY<0?1.1:0.9); }
-function mmOnDrag(e) {
-  if (!mmDragStart) return;
-  if (!mmDragging && (Math.abs(e.clientX-mmDragStart.clientX)+Math.abs(e.clientY-mmDragStart.clientY))>5) mmDragging=true;
-  if (!mmDragging) return;
-  mmTx+=(e.clientX-(mmDragStart.clientX||e.clientX)); mmTy+=(e.clientY-(mmDragStart.clientY||e.clientY));
-  mmDragStart=e; mmApplyTransform();
+
+function mmFitScreen() {
+  const wrap=document.getElementById('mm-wrap');
+  if (!wrap) return;
+  const groups=mmBuildGroups();
+  if (!groups.length) return;
+  const b=mmGetBounds(mmCalcLayout(groups));
+  const ww=wrap.clientWidth, wh=wrap.clientHeight;
+  mmSc=Math.min((ww-80)/b.w,(wh-80)/b.h,1.2);
+  mmPx=-b.cx*mmSc; mmPy=-b.cy*mmSc;
+  mmApplyVP();
 }
+function mmZoomBtn(f){mmSc=Math.min(3,Math.max(0.15,mmSc*f));mmApplyVP();}
+function mmWheel(e){e.preventDefault();mmSc=Math.min(3,Math.max(0.15,mmSc*(e.deltaY<0?1.12:0.9)));mmApplyVP();}
+function mmMouseDown(e){if(e.button!==0)return;mmIsDrag=false;mmDx=e.clientX;mmDy=e.clientY;const w=document.getElementById('mm-wrap');if(w)w.style.cursor='grabbing';}
+function mmMouseMove(e){
+  if(!mmDx&&!mmDy)return;
+  const dx=e.clientX-mmDx,dy=e.clientY-mmDy;
+  if(Math.abs(dx)+Math.abs(dy)>3)mmIsDrag=true;
+  if(mmIsDrag){mmPx+=dx;mmPy+=dy;mmDx=e.clientX;mmDy=e.clientY;mmApplyVP();}
+}
+function mmMouseUp(){mmDx=0;mmDy=0;const w=document.getElementById('mm-wrap');if(w)w.style.cursor='grab';}
+function mmCollapseAll(){const g=mmBuildGroups();g.forEach(g=>mmCollapsed[g.key]=true);mmDraw();}
+function mmExpandAll(){mmCollapsed={};mmDraw();}
 
 function renderProjectsView(el) {
   el.innerHTML = `
