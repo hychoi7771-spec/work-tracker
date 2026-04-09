@@ -62,17 +62,21 @@ body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; backgrou
 .co-btn.active-all { background: #f0f0f0; color: var(--text); border-color: #ccc; }
 .co-btn.active-shfood { background: #e8f5e0; color: #2a6a1a; border-color: #7aba5a; }
 .co-btn.active-rlkorea { background: #f5e0f0; color: #7a1a6a; border-color: #c87ab8; }
+.co-btn.active-common { background: #e0eef8; color: #1a4a7a; border-color: #6a9aba; }
 .co-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .co-dot-all { background: #aaa; }
 .co-dot-shfood { background: #4a9a2a; }
 .co-dot-rlkorea { background: #9a2a8a; }
+.co-dot-common { background: #2a6a9a; }
 .co-badge { font-size: 10px; padding: 1px 6px; border-radius: 20px; margin-left: auto; }
 .co-badge-shfood { background: #d0f0c0; color: #2a6a1a; }
 .co-badge-rlkorea { background: #f0d0e8; color: #7a1a6a; }
+.co-badge-common { background: #d0e8f8; color: #1a4a7a; }
 /* 업무 테이블 법인 뱃지 */
 .company-chip { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; vertical-align: middle; margin-left: 4px; }
 .company-chip-shfood { background: #d0f0c0; color: #2a6a1a; }
 .company-chip-rlkorea { background: #f0d0e8; color: #7a1a6a; }
+.company-chip-common { background: #d0e8f8; color: #1a4a7a; }
 #sidebar.collapsed .company-switcher { padding: 8px 0; }
 #sidebar.collapsed .company-switcher-label, #sidebar.collapsed .co-btn span:last-of-type { display: none; }
 #sidebar.collapsed .co-btn { padding: 7px; justify-content: center; }
@@ -427,6 +431,10 @@ tr:hover td { background: #fafffe; }
         <span class="co-dot co-dot-rlkorea"></span><span>RLKorea</span>
         <span class="co-badge co-badge-rlkorea" id="co-cnt-rlkorea"></span>
       </div>
+      <div class="co-btn" id="co-common" onclick="switchCompany('common')">
+        <span class="co-dot co-dot-common"></span><span>공통</span>
+        <span class="co-badge co-badge-common" id="co-cnt-common"></span>
+      </div>
     </div>
   </div>
   <div class="nav-menu">
@@ -518,6 +526,7 @@ tr:hover td { background: #fafffe; }
         <select id="f-company">
           <option value="shfood">🍃 SHFood (식품)</option>
           <option value="rlkorea">💄 RLKorea (화장품)</option>
+          <option value="common">🤝 공통 (양사 공통)</option>
         </select>
       </div>
       <div class="form-group">
@@ -1088,7 +1097,7 @@ function showView(v) {
 // ══════════════════════════════════════
 function renderDashboard(el) {
   const today = new Date(); today.setHours(0,0,0,0);
-  const coF = t => (currentCompany==='all' || t.company===currentCompany) && !t.parentId;
+  const coF = t => (currentCompany==='all' || t.company===currentCompany || (currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')) && !t.parentId;
   const vtasks = tasks.filter(coF);
   const total = vtasks.length;
   const doing = vtasks.filter(t=>t.status==='진행중').length;
@@ -1135,7 +1144,7 @@ function renderDashboard(el) {
 
 function buildCharts(vtasks) {
   if (!vtasks) {
-    const coF = t => (currentCompany==='all' || t.company===currentCompany) && !t.parentId;
+    const coF = t => (currentCompany==='all' || t.company===currentCompany || (currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')) && !t.parentId;
     vtasks = tasks.filter(coF);
   }
   const statusData = ['대기','진행중','검토중','완료'].map(s=>vtasks.filter(t=>t.status===s).length);
@@ -1261,8 +1270,14 @@ function applySortTasks(list) {
 
 function filteredTasks() {
   return tasks.filter(t => {
-    if (t.parentId) return false; // 하위업무 제외
-    if (currentCompany !== 'all' && t.company !== currentCompany) return false;
+    if (t.parentId) return false;
+    if (currentCompany !== 'all') {
+      const isCommon = t.company === 'common';
+      const matchCo = t.company === currentCompany;
+      // 공통 탭: 공통 업무만 / 법인 탭: 해당 법인 + 공통
+      if (currentCompany === 'common' && !isCommon) return false;
+      if (currentCompany !== 'common' && !matchCo && !isCommon) return false;
+    }
     if (filterStatus && t.status!==filterStatus) return false;
     if (filterPriority && t.priority!==filterPriority) return false;
     if (filterAssignee && t.assignee!==filterAssignee) return false;
@@ -1280,7 +1295,7 @@ function resetFilters() {
 function switchCompany(c) {
   currentCompany = c;
   // 버튼 스타일 업데이트
-  ['all','shfood','rlkorea'].forEach(id => {
+  ['all','shfood','rlkorea','common'].forEach(id => {
     const btn = document.getElementById('co-'+id);
     if (!btn) return;
     btn.className = 'co-btn' + (c===id ? ' active-'+id : '');
@@ -1288,7 +1303,7 @@ function switchCompany(c) {
   // 사이드바 색상 힌트
   const sidebar = document.getElementById('sidebar');
   if (sidebar) {
-    sidebar.style.borderRight = c==='shfood' ? '3px solid #7aba5a' : c==='rlkorea' ? '3px solid #c87ab8' : '';
+    sidebar.style.borderRight = c==='shfood' ? '3px solid #7aba5a' : c==='rlkorea' ? '3px solid #c87ab8' : c==='common' ? '3px solid #6a9aba' : '';
   }
   // 현재 뷰 갱신
   showView(currentView);
@@ -1298,19 +1313,23 @@ function switchCompany(c) {
 function updateCompanyCounts() {
   const top = tasks.filter(t=>!t.parentId);
   const total = top.length;
-  const sf = top.filter(t=>t.company==='shfood').length;
-  const rl = top.filter(t=>t.company==='rlkorea').length;
+  const sf  = top.filter(t=>t.company==='shfood').length;
+  const rl  = top.filter(t=>t.company==='rlkorea').length;
+  const com = top.filter(t=>t.company==='common').length;
   const elAll = document.getElementById('co-cnt-all');
   const elSf  = document.getElementById('co-cnt-shfood');
   const elRl  = document.getElementById('co-cnt-rlkorea');
+  const elCom = document.getElementById('co-cnt-common');
   if (elAll) elAll.textContent = total;
   if (elSf)  elSf.textContent  = sf;
   if (elRl)  elRl.textContent  = rl;
+  if (elCom) elCom.textContent = com;
 }
 
 function coLabel(company) {
   if (company==='shfood')  return '<span class="company-chip company-chip-shfood">SHFood</span>';
   if (company==='rlkorea') return '<span class="company-chip company-chip-rlkorea">RLKorea</span>';
+  if (company==='common')  return '<span class="company-chip company-chip-common">공통</span>';
   return '';
 }
 function refreshTaskTable() {
@@ -1454,7 +1473,7 @@ function renderCalendar(el) {
     const dt = new Date(y,m,d); dt.setHours(0,0,0,0);
     const dtStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isToday = dt.toDateString()===today.toDateString();
-    const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dtStr&&t.end>=dtStr&&!t.parentId&&(currentCompany==='all'||t.company===currentCompany));
+    const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dtStr&&t.end>=dtStr&&!t.parentId&&(currentCompany==='all'||(currentCompany==='common'&&t.company==='common')||t.company===currentCompany||(currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')));
     const isSun = dt.getDay()===0, isSat = dt.getDay()===6;
     cells += `<div class="cal-cell${isToday?' today':''}" onclick="openAddTask({start:'${dtStr}',end:'${dtStr}'})" onmouseenter="calShowTooltip(event,'${dtStr}')" onmouseleave="calHideTooltip()" style="cursor:pointer;">
       <div class="cal-date" style="color:${isSun?'#d04040':isSat?'#4060d0':'var(--text)'}">
@@ -1608,7 +1627,7 @@ function renderKanban(el) {
     return `<span class="dday dday-ok">D-${diff}</span>`;
   };
   el.innerHTML = `<div class="kanban-wrap">` + KANBAN_COLS.map(col => {
-    const colTasks = tasks.filter(t=>t.status===col.key && !t.parentId && (currentCompany==='all'||t.company===currentCompany));
+    const colTasks = tasks.filter(t=>t.status===col.key && !t.parentId && (currentCompany==='all'||(currentCompany==='common'&&t.company==='common')||t.company===currentCompany||(currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')));
     const cards = colTasks.map(t => `
       <div class="kanban-card" draggable="true"
         style="border-left-color:${prioBorder[t.priority]||'var(--primary)'};"
@@ -1796,7 +1815,7 @@ function updateNavBadges() {
   // 상단 타이틀에 법인 표시
   const titleEl = document.getElementById('topbar-title');
   if (titleEl && currentCompany !== 'all') {
-    const names = {shfood:'🍃 SHFood', rlkorea:'💄 RLKorea'};
+    const names = {shfood:'🍃 SHFood', rlkorea:'💄 RLKorea', common:'🤝 공통'};
     const base = titleEl.textContent.replace(/\s*[·—].*/,'').trim();
     titleEl.textContent = base + ' — ' + names[currentCompany];
   }
@@ -1822,6 +1841,7 @@ function renderAdminView(el) {
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-sm" style="background:#e8f5e0;color:#2a6a1a;border:1px solid #7aba5a;" onclick="bulkSetCompany('shfood')">전체 → SHFood</button>
           <button class="btn btn-sm" style="background:#f5e0f0;color:#7a1a6a;border:1px solid #c87ab8;" onclick="bulkSetCompany('rlkorea')">전체 → RLKorea</button>
+          <button class="btn btn-sm" style="background:#e0eef8;color:#1a4a7a;border:1px solid #6a9aba;" onclick="bulkSetCompany('common')">전체 → 공통</button>
           <button class="btn btn-secondary btn-sm" onclick="autoDetectAll()">🤖 자동 감지</button>
           <button class="btn btn-primary btn-sm" onclick="saveCompanyAssignments()">💾 변경사항 저장</button>
         </div>
@@ -1904,13 +1924,15 @@ function renderCompanyAssignList() {
         const detected = detectCompany(t);
         const sfActive = cur==='shfood';
         const rlActive = cur==='rlkorea';
+        const comActive = cur==='common';
         const hint = !cur && detected ? `<span style="font-size:10px;color:#888;">추천: ${detected==='shfood'?'SHFood':'RLKorea'}</span>` : '';
-        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;margin-bottom:3px;${companyChanges[t.id]?'background:#fffbe6;':''}">
+        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;margin-bottom:3px;${companyChanges[t.id]?'background:#fffbe6;':''}">
           <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.title}">${t.title}</span>
           <span style="font-size:10px;color:var(--text-light);white-space:nowrap;">${t.category||''}</span>
           ${hint}
-          <button onclick="setCaCompany('${t.id}','shfood')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${sfActive?'#4a9a2a':'#ccc'};background:${sfActive?'#d0f0c0':'#f5f5f5'};color:${sfActive?'#2a6a1a':'#666'};cursor:pointer;font-weight:${sfActive?'700':'400'};">SHFood</button>
-          <button onclick="setCaCompany('${t.id}','rlkorea')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${rlActive?'#9a2a8a':'#ccc'};background:${rlActive?'#f0d0e8':'#f5f5f5'};color:${rlActive?'#7a1a6a':'#666'};cursor:pointer;font-weight:${rlActive?'700':'400'};">RLKorea</button>
+          <button onclick="setCaCompany('${t.id}','shfood')" style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${sfActive?'#4a9a2a':'#ccc'};background:${sfActive?'#d0f0c0':'#f5f5f5'};color:${sfActive?'#2a6a1a':'#666'};cursor:pointer;font-weight:${sfActive?'700':'400'};">SHFood</button>
+          <button onclick="setCaCompany('${t.id}','rlkorea')" style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${rlActive?'#9a2a8a':'#ccc'};background:${rlActive?'#f0d0e8':'#f5f5f5'};color:${rlActive?'#7a1a6a':'#666'};cursor:pointer;font-weight:${rlActive?'700':'400'};">RLKorea</button>
+          <button onclick="setCaCompany('${t.id}','common')" style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${comActive?'#2a6a9a':'#ccc'};background:${comActive?'#d0e8f8':'#f5f5f5'};color:${comActive?'#1a4a7a':'#666'};cursor:pointer;font-weight:${comActive?'700':'400'};">공통</button>
         </div>`;
       }).join('')}
     </div>
@@ -2105,7 +2127,7 @@ function mmBuildGroups() {
   const subMap={};
   tasks.forEach(t=>{ if(t.parentId){ (subMap[t.parentId]=subMap[t.parentId]||[]).push(t); } });
   // 최상위 업무만 그룹핑 (회사 필터 적용)
-  const topTasks=tasks.filter(t=>!t.parentId&&(currentCompany==='all'||t.company===currentCompany));
+  const topTasks=tasks.filter(t=>!t.parentId&&(currentCompany==='all'||(currentCompany==='common'&&t.company==='common')||t.company===currentCompany||(currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')));
   const map={};
   if (mmMode==='project') {
     topTasks.forEach(t=>{
