@@ -420,11 +420,11 @@ tr:hover td { background: #fafffe; }
         <span class="co-badge" id="co-cnt-all" style="background:#eee;color:#666;"></span>
       </div>
       <div class="co-btn" id="co-shfood" onclick="switchCompany('shfood')">
-        <span class="co-dot co-dot-shfood"></span><span>에스에이치푸두</span>
+        <span class="co-dot co-dot-shfood"></span><span>SHFood</span>
         <span class="co-badge co-badge-shfood" id="co-cnt-shfood"></span>
       </div>
       <div class="co-btn" id="co-rlkorea" onclick="switchCompany('rlkorea')">
-        <span class="co-dot co-dot-rlkorea"></span><span>리커버리랩코리아</span>
+        <span class="co-dot co-dot-rlkorea"></span><span>RLKorea</span>
         <span class="co-badge co-badge-rlkorea" id="co-cnt-rlkorea"></span>
       </div>
     </div>
@@ -516,8 +516,8 @@ tr:hover td { background: #fafffe; }
       <div class="form-group">
         <label>법인 *</label>
         <select id="f-company">
-          <option value="shfood">🍃 에스에이치푸두 (식품)</option>
-          <option value="rlkorea">💄 리커버리랩코리아 (화장품)</option>
+          <option value="shfood">🍃 SHFood (식품)</option>
+          <option value="rlkorea">💄 RLKorea (화장품)</option>
         </select>
       </div>
       <div class="form-group">
@@ -1796,7 +1796,7 @@ function updateNavBadges() {
   // 상단 타이틀에 법인 표시
   const titleEl = document.getElementById('topbar-title');
   if (titleEl && currentCompany !== 'all') {
-    const names = {shfood:'🍃 에스에이치푸두', rlkorea:'💄 리커버리랩코리아'};
+    const names = {shfood:'🍃 SHFood', rlkorea:'💄 RLKorea'};
     const base = titleEl.textContent.replace(/\s*[·—].*/,'').trim();
     titleEl.textContent = base + ' — ' + names[currentCompany];
   }
@@ -1814,6 +1814,26 @@ function renderAdminView(el) {
       <div class="card"><div class="stat-label">현재 접속자</div><div class="stat-value" id="admin-online-count" style="color:#2d6e4a;">-</div></div>
       <div class="card"><div class="stat-label">전체 로그인 기록</div><div class="stat-value" id="admin-history-count" style="color:#5050a0;">-</div></div>
     </div>
+
+    <!-- 법인 일괄 배정 -->
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:14px;font-weight:700;">🏢 법인 일괄 배정</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-sm" style="background:#e8f5e0;color:#2a6a1a;border:1px solid #7aba5a;" onclick="bulkSetCompany('shfood')">전체 → SHFood</button>
+          <button class="btn btn-sm" style="background:#f5e0f0;color:#7a1a6a;border:1px solid #c87ab8;" onclick="bulkSetCompany('rlkorea')">전체 → RLKorea</button>
+          <button class="btn btn-secondary btn-sm" onclick="autoDetectAll()">🤖 자동 감지</button>
+          <button class="btn btn-primary btn-sm" onclick="saveCompanyAssignments()">💾 변경사항 저장</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-light);margin-bottom:10px;">
+        미배정: <strong id="ca-unassigned">-</strong>건 &nbsp;|&nbsp;
+        SHFood: <strong id="ca-sf-cnt" style="color:#2a6a1a;">-</strong>건 &nbsp;|&nbsp;
+        RLKorea: <strong id="ca-rl-cnt" style="color:#7a1a6a;">-</strong>건
+      </div>
+      <div id="company-assign-list" style="max-height:400px;overflow-y:auto;"></div>
+    </div>
+
     <div class="card" style="margin-bottom:16px;">
       <div style="font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
         🟢 실시간 접속 현황
@@ -1834,6 +1854,102 @@ function renderAdminView(el) {
     </div>
   `;
   setupAdminListeners();
+  renderCompanyAssignList();
+}
+
+// ── 법인 배정 관련 상태 ──
+let companyChanges = {}; // {taskId: 'shfood'|'rlkorea'}
+
+function detectCompany(t) {
+  const SF_KW = ['식품','식재','원료','납품','유통','생산','제조','haccp','배송','물류','식자재','음식','가공','영양','shfood','sh푸드','푸드','푸두'];
+  const RL_KW = ['화장품','스킨','뷰티','성분','처방','인증','리커버리','크림','로션','세럼','앰플','마스크','rlkorea','코스메틱','향수','클렌징','미용','피부','화장'];
+  const txt = ((t.title||'')+(t.category||'')+(t.desc||'')).toLowerCase();
+  const proj = projects.find(p=>p.id===t.project);
+  const ptxt = (proj?.name||'').toLowerCase();
+  const sfScore = SF_KW.filter(k=>(txt+ptxt).includes(k)).length;
+  const rlScore = RL_KW.filter(k=>(txt+ptxt).includes(k)).length;
+  if (sfScore > rlScore) return 'shfood';
+  if (rlScore > sfScore) return 'rlkorea';
+  return null; // 판단 불가
+}
+
+function renderCompanyAssignList() {
+  const el = document.getElementById('company-assign-list');
+  if (!el) return;
+  const topTasks = tasks.filter(t=>!t.parentId);
+  const unassigned = topTasks.filter(t=>!t.company).length;
+  const sfCnt = topTasks.filter(t=>(companyChanges[t.id]||t.company)==='shfood').length;
+  const rlCnt = topTasks.filter(t=>(companyChanges[t.id]||t.company)==='rlkorea').length;
+  const uEl = document.getElementById('ca-unassigned');
+  const sfEl = document.getElementById('ca-sf-cnt');
+  const rlEl = document.getElementById('ca-rl-cnt');
+  if (uEl) uEl.textContent = topTasks.filter(t=>!(companyChanges[t.id]||t.company)).length;
+  if (sfEl) sfEl.textContent = sfCnt;
+  if (rlEl) rlEl.textContent = rlCnt;
+
+  // 프로젝트별 그룹핑
+  const groups = {};
+  topTasks.forEach(t=>{
+    const proj = projects.find(p=>p.id===t.project);
+    const key = proj ? proj.name : '프로젝트 없음';
+    if (!groups[key]) groups[key]=[];
+    groups[key].push(t);
+  });
+
+  el.innerHTML = Object.entries(groups).map(([gname, gtasks])=>`
+    <div style="margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--text-light);padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">📁 ${gname} (${gtasks.length}건)</div>
+      ${gtasks.map(t=>{
+        const cur = companyChanges[t.id] || t.company || '';
+        const detected = detectCompany(t);
+        const sfActive = cur==='shfood';
+        const rlActive = cur==='rlkorea';
+        const hint = !cur && detected ? `<span style="font-size:10px;color:#888;">추천: ${detected==='shfood'?'SHFood':'RLKorea'}</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;margin-bottom:3px;${companyChanges[t.id]?'background:#fffbe6;':''}">
+          <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.title}">${t.title}</span>
+          <span style="font-size:10px;color:var(--text-light);white-space:nowrap;">${t.category||''}</span>
+          ${hint}
+          <button onclick="setCaCompany('${t.id}','shfood')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${sfActive?'#4a9a2a':'#ccc'};background:${sfActive?'#d0f0c0':'#f5f5f5'};color:${sfActive?'#2a6a1a':'#666'};cursor:pointer;font-weight:${sfActive?'700':'400'};">SHFood</button>
+          <button onclick="setCaCompany('${t.id}','rlkorea')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${rlActive?'#9a2a8a':'#ccc'};background:${rlActive?'#f0d0e8':'#f5f5f5'};color:${rlActive?'#7a1a6a':'#666'};cursor:pointer;font-weight:${rlActive?'700':'400'};">RLKorea</button>
+        </div>`;
+      }).join('')}
+    </div>
+  `).join('');
+}
+
+function setCaCompany(taskId, company) {
+  companyChanges[taskId] = company;
+  renderCompanyAssignList();
+}
+
+function bulkSetCompany(company) {
+  tasks.filter(t=>!t.parentId).forEach(t=>{ companyChanges[t.id]=company; });
+  renderCompanyAssignList();
+}
+
+function autoDetectAll() {
+  let detected = 0;
+  tasks.filter(t=>!t.parentId).forEach(t=>{
+    const d = detectCompany(t);
+    if (d) { companyChanges[t.id]=d; detected++; }
+  });
+  renderCompanyAssignList();
+  toast(`${detected}건 자동 감지 완료. 미감지 업무는 직접 지정하세요.`);
+}
+
+async function saveCompanyAssignments() {
+  const entries = Object.entries(companyChanges);
+  if (!entries.length) { toast('변경사항이 없습니다','warning'); return; }
+  toast('저장 중...');
+  let saved = 0;
+  for (const [taskId, company] of entries) {
+    await dbUpdate('tasks', taskId, {company});
+    saved++;
+  }
+  companyChanges = {};
+  renderCompanyAssignList();
+  updateCompanyCounts();
+  toast(`${saved}건 법인 배정 저장 완료! ✅`);
 }
 
 function setupAdminListeners() {
