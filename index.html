@@ -1846,12 +1846,17 @@ function renderAdminView(el) {
           <button class="btn btn-primary btn-sm" onclick="saveCompanyAssignments()">💾 변경사항 저장</button>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--text-light);margin-bottom:10px;">
-        미배정: <strong id="ca-unassigned">-</strong>건 &nbsp;|&nbsp;
-        SHFood: <strong id="ca-sf-cnt" style="color:#2a6a1a;">-</strong>건 &nbsp;|&nbsp;
-        RLKorea: <strong id="ca-rl-cnt" style="color:#7a1a6a;">-</strong>건
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:10px;font-size:12px;">
+        <span style="color:var(--text-light);">미배정 <strong id="ca-unassigned" style="color:#c04040;">-</strong>건</span>
+        <span style="color:#2a6a1a;">SHFood <strong id="ca-sf-cnt">-</strong>건</span>
+        <span style="color:#7a1a6a;">RLKorea <strong id="ca-rl-cnt">-</strong>건</span>
+        <span style="color:#1a4a7a;">공통 <strong id="ca-com-cnt">-</strong>건</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-light);">
+          <input type="checkbox" id="ca-show-all" onchange="renderCompanyAssignList()">
+          <span>배정 완료 업무도 표시</span>
+        </label>
       </div>
-      <div id="company-assign-list" style="max-height:400px;overflow-y:auto;"></div>
+      <div id="company-assign-list" style="max-height:420px;overflow-y:auto;"></div>
     </div>
 
     <div class="card" style="margin-bottom:16px;">
@@ -1896,20 +1901,40 @@ function detectCompany(t) {
 function renderCompanyAssignList() {
   const el = document.getElementById('company-assign-list');
   if (!el) return;
+  const showAll = document.getElementById('ca-show-all')?.checked;
   const topTasks = tasks.filter(t=>!t.parentId);
-  const unassigned = topTasks.filter(t=>!t.company).length;
-  const sfCnt = topTasks.filter(t=>(companyChanges[t.id]||t.company)==='shfood').length;
-  const rlCnt = topTasks.filter(t=>(companyChanges[t.id]||t.company)==='rlkorea').length;
-  const uEl = document.getElementById('ca-unassigned');
-  const sfEl = document.getElementById('ca-sf-cnt');
-  const rlEl = document.getElementById('ca-rl-cnt');
-  if (uEl) uEl.textContent = topTasks.filter(t=>!(companyChanges[t.id]||t.company)).length;
-  if (sfEl) sfEl.textContent = sfCnt;
-  if (rlEl) rlEl.textContent = rlCnt;
+
+  // 통계 업데이트
+  const remaining = topTasks.filter(t=>!(companyChanges[t.id]||t.company)).length;
+  const sfCnt  = topTasks.filter(t=>(companyChanges[t.id]||t.company)==='shfood').length;
+  const rlCnt  = topTasks.filter(t=>(companyChanges[t.id]||t.company)==='rlkorea').length;
+  const comCnt = topTasks.filter(t=>(companyChanges[t.id]||t.company)==='common').length;
+  const uEl   = document.getElementById('ca-unassigned');
+  const sfEl  = document.getElementById('ca-sf-cnt');
+  const rlEl  = document.getElementById('ca-rl-cnt');
+  const comEl = document.getElementById('ca-com-cnt');
+  if (uEl)   uEl.textContent   = remaining;
+  if (sfEl)  sfEl.textContent  = sfCnt;
+  if (rlEl)  rlEl.textContent  = rlCnt;
+  if (comEl) comEl.textContent = comCnt;
+
+  // 표시 대상: 미배정 또는 pending 변경, 또는 전체보기 체크 시 전체
+  const viewTasks = showAll
+    ? topTasks
+    : topTasks.filter(t => !t.company || companyChanges[t.id]);
+
+  // 모두 배정 완료
+  if (!showAll && viewTasks.length === 0) {
+    el.innerHTML = `<div style="text-align:center;padding:24px 0;color:#2a7a4a;">
+      ✅ 모든 업무의 법인 배정이 완료됐습니다 (총 ${topTasks.length}건)<br>
+      <span style="font-size:11px;color:var(--text-light);">위의 체크박스로 전체 목록을 확인할 수 있습니다</span>
+    </div>`;
+    return;
+  }
 
   // 프로젝트별 그룹핑
   const groups = {};
-  topTasks.forEach(t=>{
+  viewTasks.forEach(t=>{
     const proj = projects.find(p=>p.id===t.project);
     const key = proj ? proj.name : '프로젝트 없음';
     if (!groups[key]) groups[key]=[];
@@ -1918,21 +1943,26 @@ function renderCompanyAssignList() {
 
   el.innerHTML = Object.entries(groups).map(([gname, gtasks])=>`
     <div style="margin-bottom:12px;">
-      <div style="font-size:11px;font-weight:700;color:var(--text-light);padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">📁 ${gname} (${gtasks.length}건)</div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-light);padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">
+        📁 ${gname} (${gtasks.length}건)
+      </div>
       ${gtasks.map(t=>{
         const cur = companyChanges[t.id] || t.company || '';
-        const detected = detectCompany(t);
-        const sfActive = cur==='shfood';
-        const rlActive = cur==='rlkorea';
+        const isPending = !!companyChanges[t.id];
+        const isAssigned = !!t.company && !isPending;
+        const detected = !cur ? detectCompany(t) : null;
+        const sfActive  = cur==='shfood';
+        const rlActive  = cur==='rlkorea';
         const comActive = cur==='common';
-        const hint = !cur && detected ? `<span style="font-size:10px;color:#888;">추천: ${detected==='shfood'?'SHFood':'RLKorea'}</span>` : '';
-        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;margin-bottom:3px;${companyChanges[t.id]?'background:#fffbe6;':''}">
+        const hint = detected ? `<span style="font-size:10px;color:#aaa;">→${detected==='shfood'?'SHFood':'RLKorea'}</span>` : '';
+        const rowBg = isPending ? 'background:#fffbe6;' : isAssigned ? 'opacity:0.6;' : '';
+        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;margin-bottom:3px;${rowBg}">
           <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.title}">${t.title}</span>
           <span style="font-size:10px;color:var(--text-light);white-space:nowrap;">${t.category||''}</span>
           ${hint}
-          <button onclick="setCaCompany('${t.id}','shfood')" style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${sfActive?'#4a9a2a':'#ccc'};background:${sfActive?'#d0f0c0':'#f5f5f5'};color:${sfActive?'#2a6a1a':'#666'};cursor:pointer;font-weight:${sfActive?'700':'400'};">SHFood</button>
-          <button onclick="setCaCompany('${t.id}','rlkorea')" style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${rlActive?'#9a2a8a':'#ccc'};background:${rlActive?'#f0d0e8':'#f5f5f5'};color:${rlActive?'#7a1a6a':'#666'};cursor:pointer;font-weight:${rlActive?'700':'400'};">RLKorea</button>
-          <button onclick="setCaCompany('${t.id}','common')" style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${comActive?'#2a6a9a':'#ccc'};background:${comActive?'#d0e8f8':'#f5f5f5'};color:${comActive?'#1a4a7a':'#666'};cursor:pointer;font-weight:${comActive?'700':'400'};">공통</button>
+          <button onclick="setCaCompany('${t.id}','shfood')"  style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${sfActive?'#4a9a2a':'#ccc'};background:${sfActive?'#d0f0c0':'#f5f5f5'};color:${sfActive?'#2a6a1a':'#888'};cursor:pointer;font-weight:${sfActive?'700':'400'};">SHFood</button>
+          <button onclick="setCaCompany('${t.id}','rlkorea')" style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${rlActive?'#9a2a8a':'#ccc'};background:${rlActive?'#f0d0e8':'#f5f5f5'};color:${rlActive?'#7a1a6a':'#888'};cursor:pointer;font-weight:${rlActive?'700':'400'};">RLKorea</button>
+          <button onclick="setCaCompany('${t.id}','common')"  style="font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid ${comActive?'#2a6a9a':'#ccc'};background:${comActive?'#d0e8f8':'#f5f5f5'};color:${comActive?'#1a4a7a':'#888'};cursor:pointer;font-weight:${comActive?'700':'400'};">공통</button>
         </div>`;
       }).join('')}
     </div>
