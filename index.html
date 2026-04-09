@@ -53,6 +53,29 @@ body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; backgrou
 .sidebar-footer { padding: 16px 20px 0; border-top: 1px solid var(--border); }
 .collapse-btn { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-light); font-size: 13px; padding: 8px 0; }
 .collapse-btn:hover { color: var(--text); }
+/* 회사 스위처 */
+.company-switcher { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.company-switcher-label { font-size: 10px; font-weight: 700; color: var(--text-light); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 7px; }
+.company-btns { display: flex; flex-direction: column; gap: 4px; }
+.co-btn { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; border: 1.5px solid transparent; transition: all .2s; font-size: 12px; font-weight: 600; color: var(--text-light); }
+.co-btn:hover { background: var(--bg); color: var(--text); }
+.co-btn.active-all { background: #f0f0f0; color: var(--text); border-color: #ccc; }
+.co-btn.active-shfood { background: #e8f5e0; color: #2a6a1a; border-color: #7aba5a; }
+.co-btn.active-rlkorea { background: #f5e0f0; color: #7a1a6a; border-color: #c87ab8; }
+.co-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.co-dot-all { background: #aaa; }
+.co-dot-shfood { background: #4a9a2a; }
+.co-dot-rlkorea { background: #9a2a8a; }
+.co-badge { font-size: 10px; padding: 1px 6px; border-radius: 20px; margin-left: auto; }
+.co-badge-shfood { background: #d0f0c0; color: #2a6a1a; }
+.co-badge-rlkorea { background: #f0d0e8; color: #7a1a6a; }
+/* 업무 테이블 법인 뱃지 */
+.company-chip { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; vertical-align: middle; margin-left: 4px; }
+.company-chip-shfood { background: #d0f0c0; color: #2a6a1a; }
+.company-chip-rlkorea { background: #f0d0e8; color: #7a1a6a; }
+#sidebar.collapsed .company-switcher { padding: 8px 0; }
+#sidebar.collapsed .company-switcher-label, #sidebar.collapsed .co-btn span:last-of-type { display: none; }
+#sidebar.collapsed .co-btn { padding: 7px; justify-content: center; }
 
 /* ── 메인 ── */
 #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -388,6 +411,24 @@ tr:hover td { background: #fafffe; }
     <div class="logo-icon">📋</div>
     <span class="logo-text">업무 현황표</span>
   </div>
+  <!-- 회사 스위처 -->
+  <div class="company-switcher" id="company-switcher">
+    <div class="company-switcher-label">법인</div>
+    <div class="company-btns">
+      <div class="co-btn active-all" id="co-all" onclick="switchCompany('all')">
+        <span class="co-dot co-dot-all"></span><span>전체</span>
+        <span class="co-badge" id="co-cnt-all" style="background:#eee;color:#666;"></span>
+      </div>
+      <div class="co-btn" id="co-shfood" onclick="switchCompany('shfood')">
+        <span class="co-dot co-dot-shfood"></span><span>에스에이치푸두</span>
+        <span class="co-badge co-badge-shfood" id="co-cnt-shfood"></span>
+      </div>
+      <div class="co-btn" id="co-rlkorea" onclick="switchCompany('rlkorea')">
+        <span class="co-dot co-dot-rlkorea"></span><span>리커버리랩코리아</span>
+        <span class="co-badge co-badge-rlkorea" id="co-cnt-rlkorea"></span>
+      </div>
+    </div>
+  </div>
   <div class="nav-menu">
     <div class="nav-item active" onclick="showView('dashboard')" id="nav-dashboard">
       <span class="nav-icon">📊</span><span class="nav-label">대시보드</span>
@@ -471,6 +512,13 @@ tr:hover td { background: #fafffe; }
       <div class="form-group">
         <label>담당자</label>
         <select id="f-assignee"></select>
+      </div>
+      <div class="form-group">
+        <label>법인 *</label>
+        <select id="f-company">
+          <option value="shfood">🍃 에스에이치푸두 (식품)</option>
+          <option value="rlkorea">💄 리커버리랩코리아 (화장품)</option>
+        </select>
       </div>
       <div class="form-group">
         <label>카테고리</label>
@@ -809,6 +857,7 @@ let voiceRecognition = null, isRecording = false;
 let voiceTranscript = '', voiceAIResult = null;
 let taskTags = [], taskAttachments = [];
 let filterStatus = '', filterPriority = '', filterAssignee = '', filterCategory = '', filterSearch = '', filterProject = '';
+let currentCompany = 'all'; // 'all' | 'shfood' | 'rlkorea'
 let taskGroupMode = 'list'; // 'list' | 'category' | 'project'
 let taskSortBy = ''; // '' | 'category' | 'assignee' | 'priority' | 'deadline' | 'progress_asc' | 'progress_desc'
 let calendarDate = new Date();
@@ -1039,15 +1088,17 @@ function showView(v) {
 // ══════════════════════════════════════
 function renderDashboard(el) {
   const today = new Date(); today.setHours(0,0,0,0);
-  const total = tasks.length;
-  const doing = tasks.filter(t=>t.status==='진행중').length;
-  const done = tasks.filter(t=>t.status==='완료').length;
-  const late = tasks.filter(t=>t.status!=='완료'&&t.end&&new Date(t.end)<today).length;
-  const review = tasks.filter(t=>t.status==='검토중').length;
-  const avgProg = total ? Math.round(tasks.reduce((a,t)=>a+t.progress,0)/total) : 0;
+  const coF = t => (currentCompany==='all' || t.company===currentCompany) && !t.parentId;
+  const vtasks = tasks.filter(coF);
+  const total = vtasks.length;
+  const doing = vtasks.filter(t=>t.status==='진행중').length;
+  const done = vtasks.filter(t=>t.status==='완료').length;
+  const late = vtasks.filter(t=>t.status!=='완료'&&t.end&&new Date(t.end)<today).length;
+  const review = vtasks.filter(t=>t.status==='검토중').length;
+  const avgProg = total ? Math.round(vtasks.reduce((a,t)=>a+t.progress,0)/total) : 0;
 
   // D-Day 알림
-  const upcoming = tasks.filter(t=>t.status!=='완료'&&t.end).map(t=>{
+  const upcoming = vtasks.filter(t=>t.status!=='완료'&&t.end).map(t=>{
     const diff = Math.ceil((new Date(t.end)-today)/(1000*60*60*24));
     return {...t,diff};
   }).filter(t=>t.diff>=0&&t.diff<=3).sort((a,b)=>a.diff-b.diff);
@@ -1077,17 +1128,21 @@ function renderDashboard(el) {
       <div class="chart-card"><div class="chart-title">👤 담당자별 업무</div><div class="chart-wrap"><canvas id="chart-assignee"></canvas></div></div>
     </div>
     <div class="section-title">🔥 진행중 업무</div>
-    <div class="task-table-wrap">${buildTable(tasks.filter(t=>t.status==='진행중'),true)}</div>
+    <div class="task-table-wrap">${buildTable(vtasks.filter(t=>t.status==='진행중'),true)}</div>
   `;
-  buildCharts();
+  buildCharts(vtasks);
 }
 
-function buildCharts() {
-  const statusData = ['대기','진행중','검토중','완료'].map(s=>tasks.filter(t=>t.status===s).length);
-  const prioData = ['낮음','보통','높음','긴급'].map(p=>tasks.filter(t=>t.priority===p).length);
-  const cats = [...new Set(tasks.map(t=>t.category))];
-  const catData = cats.map(c=>tasks.filter(t=>t.category===c).length);
-  const members = team.map(m=>({name:m.name,count:tasks.filter(t=>t.assignee===m.id).length}));
+function buildCharts(vtasks) {
+  if (!vtasks) {
+    const coF = t => (currentCompany==='all' || t.company===currentCompany) && !t.parentId;
+    vtasks = tasks.filter(coF);
+  }
+  const statusData = ['대기','진행중','검토중','완료'].map(s=>vtasks.filter(t=>t.status===s).length);
+  const prioData = ['낮음','보통','높음','긴급'].map(p=>vtasks.filter(t=>t.priority===p).length);
+  const cats = [...new Set(vtasks.map(t=>t.category))];
+  const catData = cats.map(c=>vtasks.filter(t=>t.category===c).length);
+  const members = team.map(m=>({name:m.name,count:vtasks.filter(t=>t.assignee===m.id).length}));
 
   const pastel = ['#b8d8f5','#a8d8b9','#f9e4b7','#d4f0de'];
   const pastel2 = ['#d4eff8','#a8d8b9','#f5c6d0','#f5b8b8'];
@@ -1206,6 +1261,8 @@ function applySortTasks(list) {
 
 function filteredTasks() {
   return tasks.filter(t => {
+    if (t.parentId) return false; // 하위업무 제외
+    if (currentCompany !== 'all' && t.company !== currentCompany) return false;
     if (filterStatus && t.status!==filterStatus) return false;
     if (filterPriority && t.priority!==filterPriority) return false;
     if (filterAssignee && t.assignee!==filterAssignee) return false;
@@ -1218,6 +1275,43 @@ function filteredTasks() {
 function resetFilters() {
   filterStatus=filterPriority=filterAssignee=filterCategory=filterSearch=filterProject='';
   renderTasks(document.getElementById('content'));
+}
+
+function switchCompany(c) {
+  currentCompany = c;
+  // 버튼 스타일 업데이트
+  ['all','shfood','rlkorea'].forEach(id => {
+    const btn = document.getElementById('co-'+id);
+    if (!btn) return;
+    btn.className = 'co-btn' + (c===id ? ' active-'+id : '');
+  });
+  // 사이드바 색상 힌트
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) {
+    sidebar.style.borderRight = c==='shfood' ? '3px solid #7aba5a' : c==='rlkorea' ? '3px solid #c87ab8' : '';
+  }
+  // 현재 뷰 갱신
+  showView(currentView);
+  updateCompanyCounts();
+}
+
+function updateCompanyCounts() {
+  const top = tasks.filter(t=>!t.parentId);
+  const total = top.length;
+  const sf = top.filter(t=>t.company==='shfood').length;
+  const rl = top.filter(t=>t.company==='rlkorea').length;
+  const elAll = document.getElementById('co-cnt-all');
+  const elSf  = document.getElementById('co-cnt-shfood');
+  const elRl  = document.getElementById('co-cnt-rlkorea');
+  if (elAll) elAll.textContent = total;
+  if (elSf)  elSf.textContent  = sf;
+  if (elRl)  elRl.textContent  = rl;
+}
+
+function coLabel(company) {
+  if (company==='shfood')  return '<span class="company-chip company-chip-shfood">SHFood</span>';
+  if (company==='rlkorea') return '<span class="company-chip company-chip-rlkorea">RLKorea</span>';
+  return '';
 }
 function refreshTaskTable() {
   const wrap = document.querySelector('.task-table-wrap');
@@ -1245,7 +1339,7 @@ function buildTable(list, compact=false) {
     </tr></thead>
     <tbody>
       ${list.map(t=>`<tr>
-        <td><a href="#" onclick="openDetail('${t.id}');return false;" style="color:var(--text);text-decoration:none;font-weight:600;">${t.title}</a></td>
+        <td><a href="#" onclick="openDetail('${t.id}');return false;" style="color:var(--text);text-decoration:none;font-weight:600;">${t.title}</a>${coLabel(t.company)}</td>
         <td>${memberName(t.assignee)}</td>
         <td>${t.category}</td>
         <td><span class="badge ${statusBadge(t.status)}">${t.status}</span></td>
@@ -1360,7 +1454,7 @@ function renderCalendar(el) {
     const dt = new Date(y,m,d); dt.setHours(0,0,0,0);
     const dtStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isToday = dt.toDateString()===today.toDateString();
-    const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dtStr&&t.end>=dtStr);
+    const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dtStr&&t.end>=dtStr&&!t.parentId&&(currentCompany==='all'||t.company===currentCompany));
     const isSun = dt.getDay()===0, isSat = dt.getDay()===6;
     cells += `<div class="cal-cell${isToday?' today':''}" onclick="openAddTask({start:'${dtStr}',end:'${dtStr}'})" onmouseenter="calShowTooltip(event,'${dtStr}')" onmouseleave="calHideTooltip()" style="cursor:pointer;">
       <div class="cal-date" style="color:${isSun?'#d04040':isSat?'#4060d0':'var(--text)'}">
@@ -1514,7 +1608,7 @@ function renderKanban(el) {
     return `<span class="dday dday-ok">D-${diff}</span>`;
   };
   el.innerHTML = `<div class="kanban-wrap">` + KANBAN_COLS.map(col => {
-    const colTasks = tasks.filter(t=>t.status===col.key);
+    const colTasks = tasks.filter(t=>t.status===col.key && !t.parentId && (currentCompany==='all'||t.company===currentCompany));
     const cards = colTasks.map(t => `
       <div class="kanban-card" draggable="true"
         style="border-left-color:${prioBorder[t.priority]||'var(--primary)'};"
@@ -1691,12 +1785,21 @@ async function addPanelComment() {
 // ══════════════════════════════════════
 function updateNavBadges() {
   const myId = currentUser?.uid;
-  const myCount = tasks.filter(t=>t.assignee===myId&&t.status!=='완료').length;
+  const coFilter = t => currentCompany==='all' || t.company===currentCompany;
+  const myCount = tasks.filter(t=>t.assignee===myId&&t.status!=='완료'&&coFilter(t)).length;
   const el = document.getElementById('badge-myTasks');
   if (el) el.textContent = myCount||'';
   const kanbanEl = document.getElementById('badge-kanban');
-  const inProgress = tasks.filter(t=>t.status==='진행중').length;
+  const inProgress = tasks.filter(t=>t.status==='진행중'&&coFilter(t)).length;
   if (kanbanEl) kanbanEl.textContent = inProgress||'';
+  updateCompanyCounts();
+  // 상단 타이틀에 법인 표시
+  const titleEl = document.getElementById('topbar-title');
+  if (titleEl && currentCompany !== 'all') {
+    const names = {shfood:'🍃 에스에이치푸두', rlkorea:'💄 리커버리랩코리아'};
+    const base = titleEl.textContent.replace(/\s*[·—].*/,'').trim();
+    titleEl.textContent = base + ' — ' + names[currentCompany];
+  }
 }
 
 // ══════════════════════════════════════
@@ -1885,8 +1988,8 @@ function mmBuildGroups() {
   // 하위업무 맵 구성
   const subMap={};
   tasks.forEach(t=>{ if(t.parentId){ (subMap[t.parentId]=subMap[t.parentId]||[]).push(t); } });
-  // 최상위 업무만 그룹핑
-  const topTasks=tasks.filter(t=>!t.parentId);
+  // 최상위 업무만 그룹핑 (회사 필터 적용)
+  const topTasks=tasks.filter(t=>!t.parentId&&(currentCompany==='all'||t.company===currentCompany));
   const map={};
   if (mmMode==='project') {
     topTasks.forEach(t=>{
@@ -2301,6 +2404,7 @@ function openAddTask(prefill={}) {
   document.getElementById('f-progress-val').textContent = (prefill.progress||0)+'%';
   document.getElementById('f-start').value = prefill.start||today();
   document.getElementById('f-end').value = prefill.end||'';
+  document.getElementById('f-company').value = prefill.company || (currentCompany!=='all'?currentCompany:'shfood');
   fillAssigneeSelect(prefill.assignee||'');
   fillProjectSelect(prefill.project||'');
   renderTaskTagBadges();
@@ -2324,6 +2428,7 @@ function openEditTask(id) {
   document.getElementById('f-progress-val').textContent = t.progress+'%';
   document.getElementById('f-start').value = t.start||'';
   document.getElementById('f-end').value = t.end||'';
+  document.getElementById('f-company').value = t.company||'shfood';
   fillAssigneeSelect(t.assignee);
   document.getElementById('f-category').value = t.category;
   fillProjectSelect(t.project||'');
@@ -2346,6 +2451,7 @@ async function saveTask() {
   const existing = editingId ? tasks.find(x=>x.id===editingId) : null;
   const t = {
     id: taskId, title,
+    company: document.getElementById('f-company').value || 'shfood',
     assignee: document.getElementById('f-assignee').value,
     category: document.getElementById('f-category').value,
     project: document.getElementById('f-project').value,
