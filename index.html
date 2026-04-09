@@ -1097,8 +1097,7 @@ function showView(v) {
 // ══════════════════════════════════════
 function renderDashboard(el) {
   const today = new Date(); today.setHours(0,0,0,0);
-  const coF = t => (currentCompany==='all' || t.company===currentCompany || (currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')) && !t.parentId;
-  const vtasks = tasks.filter(coF);
+  const vtasks = tasks.filter(t => !t.parentId && coMatch(t));
   const total = vtasks.length;
   const doing = vtasks.filter(t=>t.status==='진행중').length;
   const done = vtasks.filter(t=>t.status==='완료').length;
@@ -1144,8 +1143,7 @@ function renderDashboard(el) {
 
 function buildCharts(vtasks) {
   if (!vtasks) {
-    const coF = t => (currentCompany==='all' || t.company===currentCompany || (currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')) && !t.parentId;
-    vtasks = tasks.filter(coF);
+    vtasks = tasks.filter(t => !t.parentId && coMatch(t));
   }
   const statusData = ['대기','진행중','검토중','완료'].map(s=>vtasks.filter(t=>t.status===s).length);
   const prioData = ['낮음','보통','높음','긴급'].map(p=>vtasks.filter(t=>t.priority===p).length);
@@ -1268,16 +1266,16 @@ function applySortTasks(list) {
   });
 }
 
+// 법인 필터: all/공통=전체표시, shfood/rlkorea=해당법인+공통
+function coMatch(t) {
+  if (currentCompany === 'all' || currentCompany === 'common') return true;
+  return t.company === currentCompany || t.company === 'common';
+}
+
 function filteredTasks() {
   return tasks.filter(t => {
     if (t.parentId) return false;
-    if (currentCompany !== 'all') {
-      const isCommon = t.company === 'common';
-      const matchCo = t.company === currentCompany;
-      // 공통 탭: 공통 업무만 / 법인 탭: 해당 법인 + 공통
-      if (currentCompany === 'common' && !isCommon) return false;
-      if (currentCompany !== 'common' && !matchCo && !isCommon) return false;
-    }
+    if (!coMatch(t)) return false;
     if (filterStatus && t.status!==filterStatus) return false;
     if (filterPriority && t.priority!==filterPriority) return false;
     if (filterAssignee && t.assignee!==filterAssignee) return false;
@@ -1473,7 +1471,7 @@ function renderCalendar(el) {
     const dt = new Date(y,m,d); dt.setHours(0,0,0,0);
     const dtStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isToday = dt.toDateString()===today.toDateString();
-    const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dtStr&&t.end>=dtStr&&!t.parentId&&(currentCompany==='all'||(currentCompany==='common'&&t.company==='common')||t.company===currentCompany||(currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')));
+    const dayTasks = tasks.filter(t=>t.start&&t.end&&t.start<=dtStr&&t.end>=dtStr&&!t.parentId&&coMatch(t));
     const isSun = dt.getDay()===0, isSat = dt.getDay()===6;
     cells += `<div class="cal-cell${isToday?' today':''}" onclick="openAddTask({start:'${dtStr}',end:'${dtStr}'})" onmouseenter="calShowTooltip(event,'${dtStr}')" onmouseleave="calHideTooltip()" style="cursor:pointer;">
       <div class="cal-date" style="color:${isSun?'#d04040':isSat?'#4060d0':'var(--text)'}">
@@ -1627,7 +1625,7 @@ function renderKanban(el) {
     return `<span class="dday dday-ok">D-${diff}</span>`;
   };
   el.innerHTML = `<div class="kanban-wrap">` + KANBAN_COLS.map(col => {
-    const colTasks = tasks.filter(t=>t.status===col.key && !t.parentId && (currentCompany==='all'||(currentCompany==='common'&&t.company==='common')||t.company===currentCompany||(currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')));
+    const colTasks = tasks.filter(t=>t.status===col.key && !t.parentId && coMatch(t));
     const cards = colTasks.map(t => `
       <div class="kanban-card" draggable="true"
         style="border-left-color:${prioBorder[t.priority]||'var(--primary)'};"
@@ -1804,7 +1802,7 @@ async function addPanelComment() {
 // ══════════════════════════════════════
 function updateNavBadges() {
   const myId = currentUser?.uid;
-  const coFilter = t => currentCompany==='all' || t.company===currentCompany;
+  const coFilter = t => coMatch(t);
   const myCount = tasks.filter(t=>t.assignee===myId&&t.status!=='완료'&&coFilter(t)).length;
   const el = document.getElementById('badge-myTasks');
   if (el) el.textContent = myCount||'';
@@ -2157,7 +2155,7 @@ function mmBuildGroups() {
   const subMap={};
   tasks.forEach(t=>{ if(t.parentId){ (subMap[t.parentId]=subMap[t.parentId]||[]).push(t); } });
   // 최상위 업무만 그룹핑 (회사 필터 적용)
-  const topTasks=tasks.filter(t=>!t.parentId&&(currentCompany==='all'||(currentCompany==='common'&&t.company==='common')||t.company===currentCompany||(currentCompany!=='all'&&currentCompany!=='common'&&t.company==='common')));
+  const topTasks=tasks.filter(t=>!t.parentId&&coMatch(t));
   const map={};
   if (mmMode==='project') {
     topTasks.forEach(t=>{
