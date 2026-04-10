@@ -2250,6 +2250,28 @@ function renderAdminView(el) {
       <div class="card"><div class="stat-label">전체 로그인 기록</div><div class="stat-value" id="admin-history-count" style="color:#5050a0;">-</div></div>
     </div>
 
+    <!-- 업무 유형 일괄 변경 -->
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:14px;font-weight:700;">🗂️ 업무 유형 일괄 변경</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-sm" style="background:#eef8e8;color:#2a6a1a;border:1px solid #7aba5a;" onclick="bulkSetTaskType('regular')">전체 → 일반 업무</button>
+          <button class="btn btn-sm" style="background:#f0ecfc;color:#5a3a90;border:1px solid #8b6ad0;" onclick="bulkSetTaskType('longterm')">전체 → 장기 계획</button>
+          <button class="btn btn-primary btn-sm" onclick="saveTaskTypeChanges()">💾 변경사항 저장</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:10px;font-size:12px;">
+        <span style="color:var(--text-light);">미지정 <strong id="tt-unset-cnt" style="color:#c04040;">-</strong>건</span>
+        <span style="color:#2a6a1a;">📋 일반 <strong id="tt-reg-cnt">-</strong>건</span>
+        <span style="color:#5a3a90;">🗺️ 장기 <strong id="tt-lt-cnt">-</strong>건</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-light);">
+          <input type="checkbox" id="tt-show-all" onchange="renderTaskTypeList()">
+          <span>지정 완료 업무도 표시</span>
+        </label>
+      </div>
+      <div id="tasktype-assign-list" style="max-height:380px;overflow-y:auto;"></div>
+    </div>
+
     <!-- 법인 일괄 배정 -->
     <div class="card" style="margin-bottom:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
@@ -2296,6 +2318,107 @@ function renderAdminView(el) {
   `;
   setupAdminListeners();
   renderCompanyAssignList();
+  renderTaskTypeList();
+}
+
+// ── 업무 유형 일괄 변경 ──
+let taskTypeChanges = {};
+
+function renderTaskTypeList() {
+  const el = document.getElementById('tasktype-assign-list');
+  if (!el) return;
+  const showAll = document.getElementById('tt-show-all')?.checked;
+  const topTasks = tasks.filter(t => !t.parentId);
+
+  // 통계
+  const unset  = topTasks.filter(t => !t.taskType && !taskTypeChanges[t.id]).length;
+  const regCnt = topTasks.filter(t => (taskTypeChanges[t.id] || t.taskType || 'regular') === 'regular').length;
+  const ltCnt  = topTasks.filter(t => (taskTypeChanges[t.id] || t.taskType) === 'longterm').length;
+  const uEl = document.getElementById('tt-unset-cnt');
+  const rEl = document.getElementById('tt-reg-cnt');
+  const lEl = document.getElementById('tt-lt-cnt');
+  if (uEl) uEl.textContent = unset;
+  if (rEl) rEl.textContent = regCnt;
+  if (lEl) lEl.textContent = ltCnt;
+
+  // 표시 대상: 미지정(taskType 없음) 또는 변경 대기 중인 것, 전체보기 시 전체
+  const viewTasks = showAll
+    ? topTasks
+    : topTasks.filter(t => !t.taskType || taskTypeChanges[t.id]);
+
+  if (!showAll && viewTasks.length === 0) {
+    el.innerHTML = `<div style="text-align:center;padding:24px 0;color:#2a7a4a;">
+      ✅ 모든 업무의 유형이 지정됐습니다 (총 ${topTasks.length}건)<br>
+      <span style="font-size:11px;color:var(--text-light);">체크박스로 전체 목록을 확인할 수 있습니다</span>
+    </div>`;
+    return;
+  }
+
+  // 프로젝트별 그룹
+  const groups = {};
+  viewTasks.forEach(t => {
+    const proj = projects.find(p => p.id === t.project);
+    const key = proj ? proj.name : '프로젝트 없음';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(t);
+  });
+
+  el.innerHTML = Object.entries(groups).map(([gname, gtasks]) => `
+    <div style="margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--text-light);padding:4px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">
+        📁 ${gname} (${gtasks.length}건)
+      </div>
+      ${gtasks.map(t => {
+        const cur = taskTypeChanges[t.id] || t.taskType || '';
+        const isPending = !!taskTypeChanges[t.id];
+        const isDone = !!t.taskType && !isPending;
+        const regActive = cur === 'regular' || (!cur);
+        const ltActive  = cur === 'longterm';
+        const rowBg = isPending ? 'background:#fffbe6;' : isDone ? 'opacity:0.55;' : '';
+        const coChip = t.company === 'shfood' ? `<span style="font-size:9px;background:#d0f0c0;color:#2a6a1a;border-radius:3px;padding:1px 4px;">SHFood</span>`
+          : t.company === 'rlkorea' ? `<span style="font-size:9px;background:#f0d0e8;color:#7a1a6a;border-radius:3px;padding:1px 4px;">RLKorea</span>`
+          : t.company === 'common'  ? `<span style="font-size:9px;background:#d0e8f8;color:#1a4a7a;border-radius:3px;padding:1px 4px;">공통</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;margin-bottom:3px;${rowBg}">
+          <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.title}">${t.title}</span>
+          ${coChip}
+          <span style="font-size:10px;color:var(--text-light);white-space:nowrap;">${t.category||''}</span>
+          <button onclick="setTtChange('${t.id}','regular')"
+            style="font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;font-weight:${regActive?'700':'400'};
+            border:1.5px solid ${regActive?'#7aba5a':'#ccc'};background:${regActive?'#d8f0c8':'#f5f5f5'};color:${regActive?'#2a6a1a':'#888'};">
+            📋 일반
+          </button>
+          <button onclick="setTtChange('${t.id}','longterm')"
+            style="font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;font-weight:${ltActive?'700':'400'};
+            border:1.5px solid ${ltActive?'#8b6ad0':'#ccc'};background:${ltActive?'#e8e0f8':'#f5f5f5'};color:${ltActive?'#5a3a90':'#888'};">
+            🗺️ 장기
+          </button>
+        </div>`;
+      }).join('')}
+    </div>
+  `).join('');
+}
+
+function setTtChange(taskId, type) {
+  taskTypeChanges[taskId] = type;
+  renderTaskTypeList();
+}
+
+function bulkSetTaskType(type) {
+  tasks.filter(t => !t.parentId).forEach(t => { taskTypeChanges[t.id] = type; });
+  renderTaskTypeList();
+}
+
+async function saveTaskTypeChanges() {
+  const entries = Object.entries(taskTypeChanges);
+  if (!entries.length) { toast('변경사항이 없습니다', 'warning'); return; }
+  toast('저장 중...');
+  for (const [taskId, taskType] of entries) {
+    await dbUpdate('tasks', taskId, { taskType });
+  }
+  taskTypeChanges = {};
+  renderTaskTypeList();
+  updateNavBadges();
+  toast(`${entries.length}건 업무 유형 저장 완료! ✅`);
 }
 
 // ── 법인 배정 관련 상태 ──
